@@ -4,7 +4,7 @@ module.exports = {
       name: 'liftlog',
       script: './backend/src/index.js',
       cwd: '/var/work/LiftLog',
-      env_file: './backend/env',
+      env_file: './backend/.env',
       env: {
         NODE_ENV: 'production',
         PORT: 3001,

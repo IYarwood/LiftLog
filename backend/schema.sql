@@ -7,12 +7,23 @@ CREATE TABLE IF NOT EXISTS exercises (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,           -- client-generated uid
   started_at TIMESTAMPTZ NOT NULL,
   finished_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Per-user ownership of sessions (nullable; backfilled by scripts/backfill-owner.js)
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 
 CREATE TABLE IF NOT EXISTS session_exercises (
   id TEXT PRIMARY KEY,           -- client-generated uid

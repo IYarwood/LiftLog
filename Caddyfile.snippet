@@ -1,0 +1,11 @@
+# Add this block to your existing Caddyfile on the VPS
+# Assumes liftlog.ianyarwood.com is pointed at your VPS IP
+
+liftlog.ianyarwood.com {
+    # Serve the frontend HTML
+    root * /var/www/liftlog/frontend
+    file_server
+
+    # Proxy /api to the Express backend (PM2 running on port 3001)
+    reverse_proxy /api/* localhost:3001
+}

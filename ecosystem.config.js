@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'liftlog',
       script: './backend/src/index.js',
-      cwd: '/var/www/liftlog',
+      cwd: '/root/work/LiftLog',
       env: {
         NODE_ENV: 'production',
         PORT: 3001,

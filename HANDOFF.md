@@ -39,7 +39,7 @@ liftlog/
 
 ## VPS context
 - Hostinger VPS running Ubuntu
-- Deploy path: `/var/www/liftlog`
+- Deploy path: `/var/work/LiftLog`
 - Caddy config: `/etc/caddy/Caddyfile` — already configured for `liftlog.ianyarwood.com`
 - PM2 and Caddy are installed and running
 
@@ -51,10 +51,10 @@ These steps are done once by hand over SSH. Claude Code does not need to do thes
 
 ```bash
 # 1. Clone the repo
-mkdir -p /var/www
-cd /var/www
-git clone https://github.com/YOUR_USERNAME/liftlog.git
-cd liftlog
+mkdir -p /var/work
+cd /var/work
+git clone https://github.com/IYarwood/LiftLog.git
+cd LiftLog
 
 # 2. Install backend dependencies
 cd backend && npm install --omit=dev && cd ..
@@ -66,7 +66,7 @@ nano backend/.env
 
 # 4. Create DB and run schema (ONE TIME ONLY)
 sudo -u postgres psql -c "CREATE DATABASE liftlog;"
-sudo -u postgres psql -d liftlog -f /var/www/liftlog/backend/schema.sql
+sudo -u postgres psql -d liftlog -f /var/work/LiftLog/backend/schema.sql
 
 # 5. Start with PM2
 pm2 start ecosystem.config.js
@@ -92,7 +92,7 @@ curl https://liftlog.ianyarwood.com/api/exercises
 
 On the VPS via SSH:
 ```bash
-cd /var/www/liftlog
+cd /var/work/LiftLog
 ./deploy.sh
 ```
 

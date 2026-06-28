@@ -8,7 +8,7 @@ echo "→ Pulling latest changes..."
 git pull
 
 echo "→ Installing dependencies..."
-cd /root/work/LiftLog/backend && npm install --omit=dev
+cd /var/work/LiftLog/backend && npm install --omit=dev
 
 echo "→ Restarting app..."
 pm2 restart liftlog

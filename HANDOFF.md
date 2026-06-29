@@ -100,6 +100,47 @@ cd /var/work/LiftLog
 
 ---
 
+## User accounts migration (one-time, on the VPS)
+
+Run these **in order** — the owner account must exist before its sessions can be backfilled:
+
+```bash
+cd /var/work/LiftLog
+git pull
+cd backend && npm install            # pulls in bcryptjs, jsonwebtoken
+
+# 1. Add a JWT secret to backend/.env (one line):
+echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
+
+# 2. Apply idempotent schema changes (safe to re-run):
+sudo -u postgres psql -d liftlog -f schema.sql
+
+# 3. Create the owner account:
+node src/scripts/create-user.js ian <password>
+
+# 4. Backfill existing sessions to the owner:
+node src/scripts/backfill-owner.js ian
+
+# 5. Restart:
+pm2 restart liftlog
+```
+
+### Verify
+```bash
+# login returns a token
+curl -s -X POST https://liftlog.ianyarwood.com/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"ian","password":"<password>"}'
+
+# sessions now require auth (401 without a token)
+curl -s -o /dev/null -w '%{http_code}\n' https://liftlog.ianyarwood.com/api/sessions   # → 401
+
+# exercises stay public
+curl -s https://liftlog.ianyarwood.com/api/exercises   # → ["Bench Press", ...]
+```
+
+---
+
 ## Claude Code's job
 
 Claude Code works **locally** only. Its responsibilities:
@@ -125,6 +166,15 @@ Client generates all IDs (`uid()` → random string). `saved_at` is null until t
 ## API contract
 
 All routes under `/api`. Caddy proxies `/api/*` to `localhost:3001`.
+
+### Auth
+| Method | Path | Body | Notes |
+|--------|------|------|-------|
+| POST | `/api/auth/login` | `{ username, password }` | → `{ token, username }` or 401 (generic) |
+| GET | `/api/auth/me` | — | Bearer token → `{ username }` or 401 |
+
+All `/api/sessions/*` routes now require `Authorization: Bearer <token>`.
+`/api/exercises` and `/api/health` remain public.
 
 ### Exercises
 | Method | Path | Body | Notes |
@@ -176,7 +226,7 @@ All routes under `/api`. Caddy proxies `/api/*` to `localhost:3001`.
 ---
 
 ## MVP cuts (intentional, add later)
-- No auth — personal tool, VPS is the only access point
+- No signup, password reset, or token refresh — username/password login only. Exercise library remains shared.
 - No data export
 - No exercise reordering within a session
 - No editing of completed sessions

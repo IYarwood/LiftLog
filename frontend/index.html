@@ -195,6 +195,7 @@
   <span class="nav-spacer"></span>
   <button class="nav-btn" id="btn-back" onclick="goBack()" style="display:none">← back</button>
   <button class="nav-btn" id="btn-history" onclick="showView('history')">history</button>
+  <button class="nav-btn" id="btn-logout" onclick="logout()">log out</button>
 </nav>
 
 <div id="main">
@@ -263,25 +264,8 @@
   </div>
 </div>
 
-<script>
-// ─── Config ───────────────────────────────────────────────────────────────────
-// NOTE for Claude Code: update this to match your VPS subdomain/path
-const API = '/api';
-
-// ─── API helpers ──────────────────────────────────────────────────────────────
-async function api(method, path, body) {
-  const res = await fetch(API + path, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`API ${method} ${path} failed: ${res.status}`);
-  return res.json();
-}
-const GET    = (path)        => api('GET', path);
-const POST   = (path, body)  => api('POST', path, body);
-const PATCH  = (path, body)  => api('PATCH', path, body);
-const DELETE = (path)        => api('DELETE', path);
+<script type="module">
+import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let exercises = [];   // string[]
@@ -333,6 +317,11 @@ function goBack() {
   if (currentView === 'session-detail') { showView('history'); return; }
   if (currentView === 'manage') { showView('home'); return; }
   showView('home');
+}
+
+function logout() {
+  clearToken();
+  window.location.href = '/login.html';
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -660,8 +649,26 @@ async function createAndAdd(name) {
   addExerciseToSession(name);
 }
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
-init();
+// ─── Expose inline-handler functions (module scope is not global) ─────────────
+Object.assign(window, {
+  showView, goBack, startSession, finishSession,
+  addExerciseToSession, createAndAdd, removeExercise, removeExercise_lib,
+  addSet, saveSet, removeSet, updateSetField,
+  openOverlay, renderOverlay, overlayBgClick, openDetail, renderManage,
+  logout,
+});
+
+// ─── Boot: require a valid token before loading the app ───────────────────────
+async function boot() {
+  if (!getToken()) { window.location.href = '/login.html'; return; }
+  try {
+    await GET('/auth/me');   // 401 → api() clears token + redirects to /login.html
+  } catch (err) {
+    return; // redirect already triggered
+  }
+  init();
+}
+boot();
 </script>
 </body>
 </html>

@@ -27,6 +27,25 @@ test('GET /api/sessions scopes the list query to the user', async () => {
   assert.deepStrictEqual(captured.params, [7]);
 });
 
+test('GET /api/sessions/active scopes the query to the user', async () => {
+  let captured;
+  mock.method(pool, 'query', async (sql, params) => {
+    captured = { sql, params };
+    return { rows: [] };   // no active session
+  });
+  const res = await request(app).get('/api/sessions/active').set('Authorization', `Bearer ${token}`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body, null);
+  assert.match(captured.sql, /finished_at IS NULL/);
+  assert.match(captured.sql, /user_id = \$1/);
+  assert.deepStrictEqual(captured.params, [7]);
+});
+
+test('GET /api/sessions/active without a token is 401', async () => {
+  const res = await request(app).get('/api/sessions/active');
+  assert.strictEqual(res.status, 401);
+});
+
 test('GET /api/sessions/:id returns 404 when the session is not owned', async () => {
   mock.method(pool, 'query', async () => ({ rows: [] }));
   const res = await request(app).get('/api/sessions/abc').set('Authorization', `Bearer ${token}`);

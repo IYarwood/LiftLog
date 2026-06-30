@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const bcrypt = require('bcryptjs');
 
 process.env.JWT_SECRET = 'test-secret';
+process.env.NODE_ENV = 'test';   // raise the login rate-limit ceiling for the suite
 const request = require('supertest');
 const pool = require('../src/db/pool');
 const app = require('../src/app');

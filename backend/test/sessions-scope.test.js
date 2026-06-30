@@ -27,6 +27,23 @@ test('GET /api/sessions scopes the list query to the user', async () => {
   assert.deepStrictEqual(captured.params, [7]);
 });
 
+test('GET /api/sessions hydrates rows without re-querying each session', async () => {
+  let sessionSelects = 0;
+  mock.method(pool, 'query', async (sql) => {
+    if (/FROM sessions WHERE/.test(sql)) {
+      sessionSelects++;
+      return { rows: [{ id: 'sess1', started_at: 'T0', finished_at: 'T1' }] };
+    }
+    return { rows: [] };   // session_exercises (and any sets) come back empty
+  });
+  const res = await request(app).get('/api/sessions').set('Authorization', `Bearer ${token}`);
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body, [
+    { id: 'sess1', startedAt: 'T0', finishedAt: 'T1', exercises: [] },
+  ]);
+  assert.strictEqual(sessionSelects, 1);   // only the list query — no per-row re-fetch
+});
+
 test('GET /api/sessions/active scopes the query to the user', async () => {
   let captured;
   mock.method(pool, 'query', async (sql, params) => {

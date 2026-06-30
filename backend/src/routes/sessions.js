@@ -25,19 +25,13 @@ async function ownsSessionExercise(sessionId, exId, userId) {
   return r.rows.length > 0;
 }
 
-// Fetch a full session (with exercises and sets) — scoped to its owner.
-// Returns null if the session does not exist or is not owned by userId.
-async function fetchSession(sessionId, userId) {
-  const sessRes = await pool.query(
-    'SELECT * FROM sessions WHERE id = $1 AND user_id = $2',
-    [sessionId, userId]
-  );
-  if (!sessRes.rows.length) return null;
-  const sess = sessRes.rows[0];
-
+// Build the full session object (with exercises and sets) from an
+// already-fetched session row — no re-query of the session itself. Used by
+// callers that already hold the row (the list route).
+async function hydrateSession(sess) {
   const exRes = await pool.query(
     'SELECT * FROM session_exercises WHERE session_id = $1 ORDER BY position ASC',
-    [sessionId]
+    [sess.id]
   );
 
   const exercises = await Promise.all(exRes.rows.map(async (ex) => {
@@ -65,6 +59,18 @@ async function fetchSession(sessionId, userId) {
   };
 }
 
+// Fetch a full session by id — scoped to its owner. Returns null if the session
+// does not exist or is not owned by userId. For callers that don't already hold
+// the row (GET /:id and GET /active).
+async function fetchSession(sessionId, userId) {
+  const sessRes = await pool.query(
+    'SELECT * FROM sessions WHERE id = $1 AND user_id = $2',
+    [sessionId, userId]
+  );
+  if (!sessRes.rows.length) return null;
+  return hydrateSession(sessRes.rows[0]);
+}
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 // GET /api/sessions — list this user's completed sessions
@@ -74,7 +80,7 @@ router.get('/', async (req, res) => {
       'SELECT * FROM sessions WHERE finished_at IS NOT NULL AND user_id = $1 ORDER BY started_at DESC',
       [req.userId]
     );
-    const sessions = await Promise.all(sessRes.rows.map(s => fetchSession(s.id, req.userId)));
+    const sessions = await Promise.all(sessRes.rows.map(s => hydrateSession(s)));
     res.json(sessions);
   } catch (err) {
     console.error(err);

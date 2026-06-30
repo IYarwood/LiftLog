@@ -12,6 +12,19 @@ async function ownsSession(sessionId, userId) {
   return r.rows.length > 0;
 }
 
+// True if exercise `exId` exists, belongs to session `sessionId`, AND that
+// session belongs to `userId`. Verifies the full ownership chain.
+async function ownsSessionExercise(sessionId, exId, userId) {
+  const r = await pool.query(
+    `SELECT 1
+       FROM session_exercises se
+       JOIN sessions s ON s.id = se.session_id
+      WHERE se.id = $1 AND se.session_id = $2 AND s.user_id = $3`,
+    [exId, sessionId, userId]
+  );
+  return r.rows.length > 0;
+}
+
 // Fetch a full session (with exercises and sets) — scoped to its owner.
 // Returns null if the session does not exist or is not owned by userId.
 async function fetchSession(sessionId, userId) {
@@ -152,10 +165,13 @@ router.post('/:id/exercises', async (req, res) => {
 // DELETE /api/sessions/:id/exercises/:exId — remove exercise from this user's session
 router.delete('/:id/exercises/:exId', async (req, res) => {
   try {
-    if (!(await ownsSession(req.params.id, req.userId))) {
+    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
       return res.status(404).json({ error: 'Not found' });
     }
-    await pool.query('DELETE FROM session_exercises WHERE id = $1', [req.params.exId]);
+    await pool.query(
+      'DELETE FROM session_exercises WHERE id = $1 AND session_id = $2',
+      [req.params.exId, req.params.id]
+    );
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -169,7 +185,7 @@ router.post('/:id/exercises/:exId/sets', async (req, res) => {
   const { id, position } = req.body;
   if (!id) return res.status(400).json({ error: 'id required' });
   try {
-    if (!(await ownsSession(req.params.id, req.userId))) {
+    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
       return res.status(404).json({ error: 'Not found' });
     }
     await pool.query(
@@ -188,16 +204,16 @@ router.post('/:id/exercises/:exId/sets', async (req, res) => {
 router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
   const { reps, weight, savedAt } = req.body;
   try {
-    if (!(await ownsSession(req.params.id, req.userId))) {
+    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
       return res.status(404).json({ error: 'Not found' });
     }
     await pool.query(
       `UPDATE sets SET
-        reps = COALESCE($1, reps),
-        weight = COALESCE($2, weight),
-        saved_at = COALESCE($3, saved_at)
-       WHERE id = $4`,
-      [reps ?? null, weight ?? null, savedAt ?? null, req.params.setId]
+         reps = COALESCE($1, reps),
+         weight = COALESCE($2, weight),
+         saved_at = COALESCE($3, saved_at)
+       WHERE id = $4 AND session_exercise_id = $5`,
+      [reps ?? null, weight ?? null, savedAt ?? null, req.params.setId, req.params.exId]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -209,10 +225,13 @@ router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
 // DELETE /api/sessions/:id/exercises/:exId/sets/:setId — remove a set
 router.delete('/:id/exercises/:exId/sets/:setId', async (req, res) => {
   try {
-    if (!(await ownsSession(req.params.id, req.userId))) {
+    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
       return res.status(404).json({ error: 'Not found' });
     }
-    await pool.query('DELETE FROM sets WHERE id = $1', [req.params.setId]);
+    await pool.query(
+      'DELETE FROM sets WHERE id = $1 AND session_exercise_id = $2',
+      [req.params.setId, req.params.exId]
+    );
     res.json({ ok: true });
   } catch (err) {
     console.error(err);

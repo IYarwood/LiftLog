@@ -57,3 +57,51 @@ test('POST nested set returns 404 when the parent session is not owned', async (
     .send({ id: 's1', position: 0 });
   assert.strictEqual(res.status, 404);
 });
+
+test('DELETE exercise returns 404 when exId is not in the owned session', async () => {
+  // ownsSessionExercise check returns no rows → foreign child
+  mock.method(pool, 'query', async () => ({ rows: [] }));
+  const res = await request(app)
+    .delete('/api/sessions/abc/exercises/ex1')
+    .set('Authorization', `Bearer ${token}`);
+  assert.strictEqual(res.status, 404);
+});
+
+test('PATCH set returns 404 when exId is not in the owned session', async () => {
+  // ownsSessionExercise check returns no rows → foreign child
+  mock.method(pool, 'query', async () => ({ rows: [] }));
+  const res = await request(app)
+    .patch('/api/sessions/abc/exercises/ex1/sets/s1')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ reps: 10 });
+  assert.strictEqual(res.status, 404);
+});
+
+test('DELETE set returns 404 when exId is not in the owned session', async () => {
+  // ownsSessionExercise check returns no rows → foreign child
+  mock.method(pool, 'query', async () => ({ rows: [] }));
+  const res = await request(app)
+    .delete('/api/sessions/abc/exercises/ex1/sets/s1')
+    .set('Authorization', `Bearer ${token}`);
+  assert.strictEqual(res.status, 404);
+});
+
+test('DELETE exercise scopes delete to session when exercise is owned', async () => {
+  let callCount = 0;
+  let capturedMutation;
+  mock.method(pool, 'query', async (sql, params) => {
+    callCount++;
+    if (callCount === 1) {
+      // ownsSessionExercise returns owned
+      return { rows: [{}] };
+    }
+    capturedMutation = { sql, params };
+    return { rows: [], rowCount: 1 };
+  });
+  const res = await request(app)
+    .delete('/api/sessions/abc/exercises/ex1')
+    .set('Authorization', `Bearer ${token}`);
+  assert.strictEqual(res.status, 200);
+  assert.match(capturedMutation.sql, /session_id/);
+  assert.ok(capturedMutation.params.includes('abc'));
+});

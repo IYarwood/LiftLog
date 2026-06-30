@@ -48,8 +48,8 @@ test('POST /api/sessions inserts with the user_id', async () => {
   assert.deepStrictEqual(captured.params, ['x', '2026-01-01T00:00:00.000Z', 7]);
 });
 
-test('POST nested set returns 404 when the parent session is not owned', async () => {
-  // ownsSession check returns no rows → not owned
+test('POST nested set returns 404 when the exercise is not in the owned session', async () => {
+  // ownsSessionExercise returns no rows → exercise is not in the owned session
   mock.method(pool, 'query', async () => ({ rows: [] }));
   const res = await request(app)
     .post('/api/sessions/abc/exercises/ex1/sets')
@@ -104,4 +104,45 @@ test('DELETE exercise scopes delete to session when exercise is owned', async ()
   assert.strictEqual(res.status, 200);
   assert.match(capturedMutation.sql, /session_id/);
   assert.ok(capturedMutation.params.includes('abc'));
+});
+
+test('PATCH set scopes update to session_exercise when exercise is owned', async () => {
+  let callCount = 0;
+  let capturedMutation;
+  mock.method(pool, 'query', async (sql, params) => {
+    callCount++;
+    if (callCount === 1) {
+      // ownsSessionExercise returns owned
+      return { rows: [{}] };
+    }
+    capturedMutation = { sql, params };
+    return { rows: [], rowCount: 1 };
+  });
+  const res = await request(app)
+    .patch('/api/sessions/abc/exercises/ex1/sets/s1')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ reps: 10 });
+  assert.strictEqual(res.status, 200);
+  assert.match(capturedMutation.sql, /session_exercise_id/);
+  assert.ok(capturedMutation.params.includes('ex1'));
+});
+
+test('DELETE set scopes delete to session_exercise when exercise is owned', async () => {
+  let callCount = 0;
+  let capturedMutation;
+  mock.method(pool, 'query', async (sql, params) => {
+    callCount++;
+    if (callCount === 1) {
+      // ownsSessionExercise returns owned
+      return { rows: [{}] };
+    }
+    capturedMutation = { sql, params };
+    return { rows: [], rowCount: 1 };
+  });
+  const res = await request(app)
+    .delete('/api/sessions/abc/exercises/ex1/sets/s1')
+    .set('Authorization', `Bearer ${token}`);
+  assert.strictEqual(res.status, 200);
+  assert.match(capturedMutation.sql, /session_exercise_id/);
+  assert.ok(capturedMutation.params.includes('ex1'));
 });

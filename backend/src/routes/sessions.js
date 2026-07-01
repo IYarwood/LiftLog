@@ -3,15 +3,35 @@ const pool = require('../db/pool');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// Fetch a full session object (with exercises and sets) by session id
-async function fetchSession(sessionId) {
-  const sessRes = await pool.query('SELECT * FROM sessions WHERE id = $1', [sessionId]);
-  if (!sessRes.rows.length) return null;
-  const sess = sessRes.rows[0];
+// True if the session exists AND belongs to the given user.
+async function ownsSession(sessionId, userId) {
+  const r = await pool.query(
+    'SELECT 1 FROM sessions WHERE id = $1 AND user_id = $2',
+    [sessionId, userId]
+  );
+  return r.rows.length > 0;
+}
 
+// True if exercise `exId` exists, belongs to session `sessionId`, AND that
+// session belongs to `userId`. Verifies the full ownership chain.
+async function ownsSessionExercise(sessionId, exId, userId) {
+  const r = await pool.query(
+    `SELECT 1
+       FROM session_exercises se
+       JOIN sessions s ON s.id = se.session_id
+      WHERE se.id = $1 AND se.session_id = $2 AND s.user_id = $3`,
+    [exId, sessionId, userId]
+  );
+  return r.rows.length > 0;
+}
+
+// Build the full session object (with exercises and sets) from an
+// already-fetched session row — no re-query of the session itself. Used by
+// callers that already hold the row (the list route).
+async function hydrateSession(sess) {
   const exRes = await pool.query(
     'SELECT * FROM session_exercises WHERE session_id = $1 ORDER BY position ASC',
-    [sessionId]
+    [sess.id]
   );
 
   const exercises = await Promise.all(exRes.rows.map(async (ex) => {
@@ -39,15 +59,28 @@ async function fetchSession(sessionId) {
   };
 }
 
+// Fetch a full session by id — scoped to its owner. Returns null if the session
+// does not exist or is not owned by userId. For callers that don't already hold
+// the row (GET /:id and GET /active).
+async function fetchSession(sessionId, userId) {
+  const sessRes = await pool.query(
+    'SELECT * FROM sessions WHERE id = $1 AND user_id = $2',
+    [sessionId, userId]
+  );
+  if (!sessRes.rows.length) return null;
+  return hydrateSession(sessRes.rows[0]);
+}
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
-// GET /api/sessions — list all completed sessions (no sets, for list views)
+// GET /api/sessions — list this user's completed sessions
 router.get('/', async (req, res) => {
   try {
     const sessRes = await pool.query(
-      'SELECT * FROM sessions WHERE finished_at IS NOT NULL ORDER BY started_at DESC'
+      'SELECT * FROM sessions WHERE finished_at IS NOT NULL AND user_id = $1 ORDER BY started_at DESC',
+      [req.userId]
     );
-    const sessions = await Promise.all(sessRes.rows.map(s => fetchSession(s.id)));
+    const sessions = await Promise.all(sessRes.rows.map(s => hydrateSession(s)));
     res.json(sessions);
   } catch (err) {
     console.error(err);
@@ -55,14 +88,15 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/sessions/active — get the current in-progress session (if any)
+// GET /api/sessions/active — this user's in-progress session (if any)
 router.get('/active', async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM sessions WHERE finished_at IS NULL ORDER BY started_at DESC LIMIT 1'
+      'SELECT * FROM sessions WHERE finished_at IS NULL AND user_id = $1 ORDER BY started_at DESC LIMIT 1',
+      [req.userId]
     );
     if (!result.rows.length) return res.json(null);
-    const session = await fetchSession(result.rows[0].id);
+    const session = await fetchSession(result.rows[0].id, req.userId);
     res.json(session);
   } catch (err) {
     console.error(err);
@@ -70,10 +104,10 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// GET /api/sessions/:id — get a single session with all data
+// GET /api/sessions/:id — single session, owned by this user (404 otherwise)
 router.get('/:id', async (req, res) => {
   try {
-    const session = await fetchSession(req.params.id);
+    const session = await fetchSession(req.params.id, req.userId);
     if (!session) return res.status(404).json({ error: 'Not found' });
     res.json(session);
   } catch (err) {
@@ -82,15 +116,15 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/sessions — start a new session
+// POST /api/sessions — start a new session for this user
 // body: { id: string, startedAt: string }
 router.post('/', async (req, res) => {
   const { id, startedAt } = req.body;
   if (!id || !startedAt) return res.status(400).json({ error: 'id and startedAt required' });
   try {
     await pool.query(
-      'INSERT INTO sessions (id, started_at) VALUES ($1, $2)',
-      [id, startedAt]
+      'INSERT INTO sessions (id, started_at, user_id) VALUES ($1, $2, $3)',
+      [id, startedAt, req.userId]
     );
     res.json({ ok: true, id });
   } catch (err) {
@@ -99,13 +133,14 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PATCH /api/sessions/:id/finish — mark session as finished
+// PATCH /api/sessions/:id/finish — mark this user's session as finished
 router.patch('/:id/finish', async (req, res) => {
   try {
-    await pool.query(
-      'UPDATE sessions SET finished_at = NOW() WHERE id = $1',
-      [req.params.id]
+    const result = await pool.query(
+      'UPDATE sessions SET finished_at = NOW() WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
     );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -113,12 +148,15 @@ router.patch('/:id/finish', async (req, res) => {
   }
 });
 
-// POST /api/sessions/:id/exercises — add an exercise to a session
+// POST /api/sessions/:id/exercises — add an exercise to this user's session
 // body: { id: string, name: string, position: number }
 router.post('/:id/exercises', async (req, res) => {
   const { id, name, position } = req.body;
   if (!id || !name) return res.status(400).json({ error: 'id and name required' });
   try {
+    if (!(await ownsSession(req.params.id, req.userId))) {
+      return res.status(404).json({ error: 'Not found' });
+    }
     await pool.query(
       'INSERT INTO session_exercises (id, session_id, name, position) VALUES ($1, $2, $3, $4)',
       [id, req.params.id, name, position ?? 0]
@@ -130,10 +168,16 @@ router.post('/:id/exercises', async (req, res) => {
   }
 });
 
-// DELETE /api/sessions/:id/exercises/:exId — remove exercise from session
+// DELETE /api/sessions/:id/exercises/:exId — remove exercise from this user's session
 router.delete('/:id/exercises/:exId', async (req, res) => {
   try {
-    await pool.query('DELETE FROM session_exercises WHERE id = $1', [req.params.exId]);
+    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    await pool.query(
+      'DELETE FROM session_exercises WHERE id = $1 AND session_id = $2',
+      [req.params.exId, req.params.id]
+    );
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -147,6 +191,9 @@ router.post('/:id/exercises/:exId/sets', async (req, res) => {
   const { id, position } = req.body;
   if (!id) return res.status(400).json({ error: 'id required' });
   try {
+    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
+      return res.status(404).json({ error: 'Not found' });
+    }
     await pool.query(
       'INSERT INTO sets (id, session_exercise_id, position) VALUES ($1, $2, $3)',
       [id, req.params.exId, position ?? 0]
@@ -163,13 +210,16 @@ router.post('/:id/exercises/:exId/sets', async (req, res) => {
 router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
   const { reps, weight, savedAt } = req.body;
   try {
+    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
+      return res.status(404).json({ error: 'Not found' });
+    }
     await pool.query(
       `UPDATE sets SET
-        reps = COALESCE($1, reps),
-        weight = COALESCE($2, weight),
-        saved_at = COALESCE($3, saved_at)
-       WHERE id = $4`,
-      [reps ?? null, weight ?? null, savedAt ?? null, req.params.setId]
+         reps = COALESCE($1, reps),
+         weight = COALESCE($2, weight),
+         saved_at = COALESCE($3, saved_at)
+       WHERE id = $4 AND session_exercise_id = $5`,
+      [reps ?? null, weight ?? null, savedAt ?? null, req.params.setId, req.params.exId]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -181,7 +231,13 @@ router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
 // DELETE /api/sessions/:id/exercises/:exId/sets/:setId — remove a set
 router.delete('/:id/exercises/:exId/sets/:setId', async (req, res) => {
   try {
-    await pool.query('DELETE FROM sets WHERE id = $1', [req.params.setId]);
+    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    await pool.query(
+      'DELETE FROM sets WHERE id = $1 AND session_exercise_id = $2',
+      [req.params.setId, req.params.exId]
+    );
     res.json({ ok: true });
   } catch (err) {
     console.error(err);

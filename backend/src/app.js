@@ -5,6 +5,13 @@ const requireAuth = require('./middleware/auth');
 
 const app = express();
 
+// Behind Caddy on localhost (see Caddyfile.snippet). Trust exactly that one
+// loopback hop so req.ip resolves to the real client from X-Forwarded-For.
+// Without this the login limiter keys every request on 127.0.0.1 (one global
+// bucket). Use 'loopback' — not `true`, which express-rate-limit rejects as
+// too permissive (a client could spoof X-Forwarded-For to dodge the limit).
+app.set('trust proxy', 'loopback');
+
 app.use(cors());
 app.use(express.json());
 

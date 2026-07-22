@@ -51,3 +51,12 @@ test('me returns 401 without a token', async () => {
   const res = await request(app).get('/api/auth/me');
   assert.strictEqual(res.status, 401);
 });
+
+test('app trusts exactly one loopback proxy hop (Caddy) for client IP', () => {
+  // Guards the login rate limiter: req.ip must come from Caddy's X-Forwarded-For,
+  // not collapse to 127.0.0.1. See docs/bugfixes/06-login-ratelimit-trust-proxy.md.
+  const trust = app.get('trust proxy fn');
+  assert.strictEqual(typeof trust, 'function');
+  assert.strictEqual(trust('127.0.0.1', 0), true);    // the Caddy hop is trusted
+  assert.strictEqual(trust('203.0.113.9', 1), false); // the real client is not
+});

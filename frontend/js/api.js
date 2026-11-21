@@ -22,7 +22,11 @@ export async function api(method, path, body) {
     window.location.href = '/login.html';
     throw new Error('Unauthorized');
   }
-  if (!res.ok) throw new Error(`API ${method} ${path} failed: ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`API ${method} ${path} failed: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return res.json();
 }
 

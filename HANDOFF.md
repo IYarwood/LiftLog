@@ -231,3 +231,24 @@ All `/api/sessions/*` routes now require `Authorization: Bearer <token>`.
 - No exercise reordering within a session
 - No editing of completed sessions
 - No rep/weight units toggle (lbs only)
+
+---
+
+## Friends migration (one-time, on the VPS)
+
+Adds the `friendships` table + indexes. Idempotent (`IF NOT EXISTS` everywhere), safe to re-run.
+Uses the standalone migration file rather than re-running `schema.sql`, so the
+default-exercise seed doesn't re-add library exercises that were removed.
+
+```bash
+cd /var/work/LiftLog
+git pull
+cd backend
+set -a; . ./.env; set +a                       # DATABASE_URL (prod DB needs the password)
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/2026-11-21-friends.sql
+psql "$DATABASE_URL" -c '\d friendships'       # verify
+pm2 restart liftlog
+```
+
+Note: `npm test` includes integration tests that write to the DB; they skip
+themselves unless `DATABASE_URL` names a `*_test` database. Never run them on prod.

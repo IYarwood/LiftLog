@@ -28,7 +28,7 @@ const loginLimiter = rateLimit({
 app.use('/api/auth/login', loginLimiter);
 
 app.use('/api/auth', require('./routes/auth'));
-app.use('/api/exercises', require('./routes/exercises'));
+app.use('/api/exercises', requireAuth, require('./routes/exercises'));
 app.use('/api/sessions', requireAuth, require('./routes/sessions'));
 app.use('/api/friends', requireAuth, require('./routes/friends'));
 app.use('/api/feed', requireAuth, require('./routes/feed'));

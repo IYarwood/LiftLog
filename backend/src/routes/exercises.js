@@ -12,15 +12,22 @@ router.get('/', async (req, res) => {
   }
 });
 
+const MAX_NAME_LENGTH = 100;
+
 // POST /api/exercises — add a new exercise
-// body: { name: string }
+// body: { name: string }  (trimmed; 1–100 chars)
 router.post('/', async (req, res) => {
-  const { name } = req.body;
-  if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
+  const raw = req.body && req.body.name;
+  if (typeof raw !== 'string') return res.status(400).json({ error: 'name required' });
+  const name = raw.trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  if (name.length > MAX_NAME_LENGTH) {
+    return res.status(400).json({ error: `name must be at most ${MAX_NAME_LENGTH} characters` });
+  }
   try {
     await pool.query(
       'INSERT INTO exercises (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
-      [name.trim()]
+      [name]
     );
     res.json({ ok: true });
   } catch (err) {

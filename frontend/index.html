@@ -336,7 +336,7 @@
 <div id="overlay" onclick="overlayBgClick(event)">
   <div id="overlay-sheet">
     <div class="disp-sm" style="font-size:22px; letter-spacing:2px;">ADD EXERCISE</div>
-    <input class="search-input" id="ex-filter" placeholder="search or type new..." oninput="renderOverlay()" style="margin-top:12px;">
+    <input class="search-input" id="ex-filter" maxlength="100" placeholder="search or type new..." oninput="renderOverlay()" style="margin-top:12px;">
     <div id="create-btn-container"></div>
     <div id="ex-list"></div>
   </div>
@@ -389,6 +389,12 @@ function el(id) { return document.getElementById(id); }
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
+// A string argument for an inline handler, e.g. onclick="fn(${jsArg(id)})".
+// JSON.stringify makes it a valid JS string literal (quotes/backslashes escaped);
+// esc() then makes that literal safe inside the double-quoted HTML attribute
+// (the browser decodes the entities before the JS runs). Prefer data-* attributes
+// plus a delegated listener for anything that is a free-text name.
+function jsArg(v) { return esc(JSON.stringify(String(v ?? ''))); }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 function showView(name, opts = {}) {
@@ -543,12 +549,12 @@ function renderHome() {
   if (sessions.length === 0) { recent.innerHTML = ''; lbl.style.display='none'; return; }
   lbl.style.display = '';
   recent.innerHTML = sessions.slice(0, 5).map(s => `
-    <div class="card clickable" onclick="openDetail('${s.id}')">
+    <div class="card clickable" onclick="openDetail(${jsArg(s.id)})">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <div>
           <div class="disp-sm">${fmtDate(s.startedAt)}</div>
           <div class="text-d">${s.exercises.length} exercises · ${s.exercises.reduce((a,e)=>a+e.sets.length,0)} sets</div>
-          <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${e.name}</span>`).join('')}</div>
+          <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${esc(e.name)}</span>`).join('')}</div>
         </div>
         <span style="color:var(--text-f); font-size:18px;">›</span>
       </div>
@@ -590,21 +596,21 @@ function renderWorkout(flashSetId) {
       const saved = !!s.savedAt;
       const flash = s.id === flashSetId ? 'set-flash' : '';
       return `
-        <div class="set-row ${flash}" id="setrow-${s.id}">
+        <div class="set-row ${flash}" id="setrow-${esc(s.id)}">
           <div class="set-num ${saved ? 'saved' : ''}">${si+1}</div>
           <input class="set-input ${saved ? 'saved' : ''}" type="number" inputmode="numeric" placeholder="—"
-            value="${s.reps}" ${saved ? 'readonly' : ''}
-            onchange="updateSetField('${ex.id}','${s.id}','reps',this.value)"
-            oninput="updateSetField('${ex.id}','${s.id}','reps',this.value)">
+            value="${esc(s.reps)}" ${saved ? 'readonly' : ''}
+            onchange="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'reps',this.value)"
+            oninput="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'reps',this.value)">
           <input class="set-input ${saved ? 'saved' : ''}" type="number" inputmode="decimal" placeholder="—"
-            value="${s.weight}" ${saved ? 'readonly' : ''}
-            onchange="updateSetField('${ex.id}','${s.id}','weight',this.value)"
-            oninput="updateSetField('${ex.id}','${s.id}','weight',this.value)">
+            value="${esc(s.weight)}" ${saved ? 'readonly' : ''}
+            onchange="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'weight',this.value)"
+            oninput="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'weight',this.value)">
           ${saved
             ? `<div class="set-saved-check">✓</div>`
-            : `<button class="set-save-btn" onclick="saveSet('${ex.id}','${s.id}')">save</button>`
+            : `<button class="set-save-btn" onclick="saveSet(${jsArg(ex.id)},${jsArg(s.id)})">save</button>`
           }
-          <button class="set-del-btn" onclick="removeSet('${ex.id}','${s.id}')">×</button>
+          <button class="set-del-btn" onclick="removeSet(${jsArg(ex.id)},${jsArg(s.id)})">×</button>
         </div>`;
     }).join('');
 
@@ -612,14 +618,14 @@ function renderWorkout(flashSetId) {
       <div class="ex-card">
         <div class="ex-header">
           <div>
-            <div class="disp-md">${ex.name}</div>
+            <div class="disp-md">${esc(ex.name)}</div>
             ${statsHtml}
           </div>
-          <button class="ex-del" onclick="removeExercise('${ex.id}')">×</button>
+          <button class="ex-del" onclick="removeExercise(${jsArg(ex.id)})">×</button>
         </div>
         ${setsHeaderHtml}
         ${setsHtml}
-        <button class="btn-ghost" onclick="addSet('${ex.id}')">+ add set</button>
+        <button class="btn-ghost" onclick="addSet(${jsArg(ex.id)})">+ add set</button>
       </div>`;
   }).join('');
 }
@@ -632,12 +638,12 @@ function renderHistory() {
     return;
   }
   list.innerHTML = sessions.map(s => `
-    <div class="card clickable" onclick="openDetail('${s.id}')">
+    <div class="card clickable" onclick="openDetail(${jsArg(s.id)})">
       <div style="display:flex; justify-content:space-between; align-items:flex-start;">
         <div>
           <div class="disp-sm">${fmtDate(s.startedAt)}</div>
           <div class="text-d">${fmtTime(s.startedAt)}${s.finishedAt ? ' → ' + fmtTime(s.finishedAt) : ''}</div>
-          <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${e.name}</span>`).join('')}</div>
+          <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${esc(e.name)}</span>`).join('')}</div>
         </div>
         <span style="color:var(--text-f); font-size:18px;">›</span>
       </div>
@@ -920,8 +926,8 @@ function renderManage() {
   const filtered = exercises.filter(e => e.toLowerCase().includes(filter));
   el('manage-list').innerHTML = filtered.map(name => `
     <div class="ex-manage-row">
-      <span class="ex-manage-name">${name}</span>
-      <button class="ex-remove-btn" onclick="removeExercise_lib('${name}')">remove</button>
+      <span class="ex-manage-name">${esc(name)}</span>
+      <button class="ex-remove-btn" data-name="${esc(name)}">remove</button>
     </div>
   `).join('');
 }
@@ -970,30 +976,50 @@ function renderOverlay() {
 
   const createBtn = el('create-btn-container');
   if (filter && !exercises.some(e => e.toLowerCase() === filter.toLowerCase())) {
-    createBtn.innerHTML = `<button class="ex-create-btn" onclick="createAndAdd('${filter.replace(/'/g,"\\'")}')">＋ create "${filter}"</button>`;
+    createBtn.innerHTML = `<button class="ex-create-btn" data-name="${esc(filter)}">＋ create "${esc(filter)}"</button>`;
   } else {
     createBtn.innerHTML = '';
   }
 
   el('ex-list').innerHTML = filtered.map(name => `
-    <button class="ex-pick-btn" onclick="addExerciseToSession('${name.replace(/'/g,"\\'")}')">
-      ${name}${alreadyAdded.has(name) ? ' <span style="color:var(--accent-t); font-size:10px;">✓ added</span>' : ''}
+    <button class="ex-pick-btn" data-name="${esc(name)}">
+      ${esc(name)}${alreadyAdded.has(name) ? ' <span style="color:var(--accent-t); font-size:10px;">✓ added</span>' : ''}
     </button>
   `).join('');
 }
 
 async function createAndAdd(name) {
+  name = String(name || '').trim();
+  if (!name) return;
   if (!exercises.includes(name)) {
-    await POST('/exercises', { name });
+    try {
+      await POST('/exercises', { name });
+    } catch (err) {
+      alert(err.status === 400 ? 'Exercise names must be 1–100 characters.' : 'Could not create exercise — try again.');
+      return;
+    }
     exercises.push(name);
   }
   addExerciseToSession(name);
 }
 
+// Exercise names are free text shared by every user, so the buttons that act on
+// them carry the name in a data-* attribute (HTML-escaped) and are wired up here
+// instead of interpolating the name into an inline onclick.
+function onNameButton(containerId, selector, fn) {
+  el(containerId).addEventListener('click', e => {
+    const btn = e.target.closest(selector);
+    if (btn && el(containerId).contains(btn)) fn(btn.dataset.name);
+  });
+}
+onNameButton('ex-list', '.ex-pick-btn', addExerciseToSession);
+onNameButton('create-btn-container', '.ex-create-btn', createAndAdd);
+onNameButton('manage-list', '.ex-remove-btn', removeExercise_lib);
+
 // ─── Expose inline-handler functions (module scope is not global) ─────────────
 Object.assign(window, {
   showView, goBack, startSession, finishSession,
-  addExerciseToSession, createAndAdd, removeExercise, removeExercise_lib,
+  removeExercise,
   addSet, saveSet, removeSet, updateSetField,
   openOverlay, renderOverlay, overlayBgClick, openDetail, renderManage,
   logout,

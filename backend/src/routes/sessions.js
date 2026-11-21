@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const pool = require('../db/pool');
+const { parseExerciseName } = require('../validation/exerciseName');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -149,10 +150,12 @@ router.patch('/:id/finish', async (req, res) => {
 });
 
 // POST /api/sessions/:id/exercises — add an exercise to this user's session
-// body: { id: string, name: string, position: number }
+// body: { id: string, name: string (trimmed; 1–60 chars), position: number }
 router.post('/:id/exercises', async (req, res) => {
-  const { id, name, position } = req.body;
-  if (!id || !name) return res.status(400).json({ error: 'id and name required' });
+  const { id, position } = req.body;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { name, error } = parseExerciseName(req.body.name);
+  if (error) return res.status(400).json({ error });
   try {
     if (!(await ownsSession(req.params.id, req.userId))) {
       return res.status(404).json({ error: 'Not found' });

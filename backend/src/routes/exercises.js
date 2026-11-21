@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const pool = require('../db/pool');
+const { parseExerciseName } = require('../validation/exerciseName');
 
 // GET /api/exercises — list all exercises
 router.get('/', async (req, res) => {
@@ -12,18 +13,11 @@ router.get('/', async (req, res) => {
   }
 });
 
-const MAX_NAME_LENGTH = 100;
-
 // POST /api/exercises — add a new exercise
-// body: { name: string }  (trimmed; 1–100 chars)
+// body: { name: string }  (trimmed; 1–60 chars, see validation/exerciseName.js)
 router.post('/', async (req, res) => {
-  const raw = req.body && req.body.name;
-  if (typeof raw !== 'string') return res.status(400).json({ error: 'name required' });
-  const name = raw.trim();
-  if (!name) return res.status(400).json({ error: 'name required' });
-  if (name.length > MAX_NAME_LENGTH) {
-    return res.status(400).json({ error: `name must be at most ${MAX_NAME_LENGTH} characters` });
-  }
+  const { name, error } = parseExerciseName(req.body && req.body.name);
+  if (error) return res.status(400).json({ error });
   try {
     await pool.query(
       'INSERT INTO exercises (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',

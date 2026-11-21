@@ -65,8 +65,8 @@ for (const [label, body] of [
   ['whitespace-only name', { name: '   \t ' }],
   ['non-string name', { name: 123 }],
   ['array name', { name: ['Squat'] }],
-  ['101-char name', { name: 'a'.repeat(101) }],
-  ['101 chars after trim', { name: '  ' + 'a'.repeat(101) + '  ' }],
+  ['61-char name', { name: 'a'.repeat(61) }],
+  ['61 chars after trim', { name: '  ' + 'a'.repeat(61) + '  ' }],
 ]) {
   test(`POST /api/exercises rejects ${label} with 400 and no insert`, async () => {
     const q = mock.method(pool, 'query', async () => ({ rows: [] }));
@@ -76,10 +76,10 @@ for (const [label, body] of [
   });
 }
 
-test('POST /api/exercises accepts exactly 100 chars (padding trimmed first)', async () => {
+test('POST /api/exercises accepts exactly 60 chars (padding trimmed first)', async () => {
   let captured;
   mock.method(pool, 'query', async (sql, params) => { captured = params; return { rows: [] }; });
-  const name = 'b'.repeat(100);
+  const name = 'b'.repeat(60);
   const res = await auth(request(app).post('/api/exercises')).send({ name: `   ${name}   ` });
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(captured, [name]);

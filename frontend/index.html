@@ -336,7 +336,7 @@
 <div id="overlay" onclick="overlayBgClick(event)">
   <div id="overlay-sheet">
     <div class="disp-sm" style="font-size:22px; letter-spacing:2px;">ADD EXERCISE</div>
-    <input class="search-input" id="ex-filter" maxlength="100" placeholder="search or type new..." oninput="renderOverlay()" style="margin-top:12px;">
+    <input class="search-input" id="ex-filter" maxlength="60" placeholder="search or type new..." oninput="renderOverlay()" style="margin-top:12px;">
     <div id="create-btn-container"></div>
     <div id="ex-list"></div>
   </div>
@@ -464,11 +464,20 @@ async function finishSession() {
 }
 
 // ─── Exercise management in session ──────────────────────────────────────────
+// Server caps names at 60 chars (backend/src/validation/exerciseName.js).
+const EXERCISE_NAME_MSG = 'Exercise names must be 1–60 characters.';
+
 async function addExerciseToSession(name) {
   if (!active) return;
+  name = String(name || '').trim();   // match what the server stores
   const id = uid();
   const position = active.exercises.length;
-  await POST(`/sessions/${active.id}/exercises`, { id, name, position });
+  try {
+    await POST(`/sessions/${active.id}/exercises`, { id, name, position });
+  } catch (err) {
+    alert(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not add exercise — try again.');
+    return;
+  }
   active.exercises.push({ id, name, sets: [] });
   closeOverlay();
   renderWorkout();
@@ -995,7 +1004,7 @@ async function createAndAdd(name) {
     try {
       await POST('/exercises', { name });
     } catch (err) {
-      alert(err.status === 400 ? 'Exercise names must be 1–100 characters.' : 'Could not create exercise — try again.');
+      alert(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not create exercise — try again.');
       return;
     }
     exercises.push(name);

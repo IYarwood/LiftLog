@@ -162,7 +162,11 @@ describe('friends (integration, real test DB)', { skip }, () => {
     const p2 = await get('alice', `/api/feed?limit=2&before=${encodeURIComponent(p1.body.nextCursor)}`);
     assert.deepStrictEqual(p2.body.items.map(s => s.id), [b1()]);
     assert.strictEqual(p2.body.nextCursor, null);
-    assert.strictEqual((await get('alice', '/api/feed?before=garbage')).status, 400);
+    for (const bad of ['garbage', '2020|x', '1|x', '0|x', 'June 5|x', '2026-02-30T00:00:00Z|x', '2026-02-30T00:00:00.000000Z|x']) {
+      const q = encodeURIComponent(bad);
+      assert.strictEqual((await get('alice', `/api/feed?before=${q}`)).status, 400, bad);
+      assert.strictEqual((await get('alice', `/api/friends/${names.bob}/sessions?before=${q}`)).status, 400, bad);
+    }
   });
 
   test('friends cannot modify each other\'s sessions', async () => {

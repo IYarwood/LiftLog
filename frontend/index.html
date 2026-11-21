@@ -30,6 +30,7 @@
     --disp: 'Barlow Condensed', sans-serif;
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-bot: env(safe-area-inset-bottom, 0px);
+    --tabbar-h: 54px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 14px; overscroll-behavior: none; }
@@ -58,7 +59,7 @@
   #main {
     flex: 1;
     margin-top: calc(var(--safe-top) + 52px);
-    padding-bottom: calc(var(--safe-bot) + 24px);
+    padding-bottom: calc(var(--safe-bot) + 24px + var(--tabbar-h));
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -186,6 +187,46 @@
   #in-progress-banner.visible { display: block; }
 
   .loading { text-align: center; padding: 40px 0; color: var(--text-d); font-size: 12px; }
+
+  /* Bottom tab bar (top-level sections) */
+  #tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 100;
+    background: var(--bg); border-top: 1px solid var(--border);
+    display: flex; padding-bottom: var(--safe-bot);
+  }
+  .tab-btn {
+    flex: 1; min-width: 0; height: var(--tabbar-h); background: none; border: none;
+    color: var(--text-d); font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+    position: relative;
+  }
+  .tab-btn.active { color: var(--accent-t); }
+  .tab-btn.active::before { content: ''; position: absolute; top: -1px; left: 25%; right: 25%; height: 2px; background: var(--accent); border-radius: 0 0 2px 2px; }
+  .tab-btn:active { background: var(--surface); }
+  .tab-badge {
+    position: absolute; top: 7px; left: calc(50% + 20px);
+    min-width: 16px; height: 16px; line-height: 16px; padding: 0 4px;
+    border-radius: 8px; background: var(--accent); color: var(--bg);
+    font-size: 9px; letter-spacing: 0; font-weight: 500; text-align: center;
+  }
+
+  /* Friends */
+  .who { color: var(--accent-t); font-size: 11px; letter-spacing: 0.5px; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .friend-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); min-height: 52px; }
+  .friend-name { flex: 1; min-width: 0; font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .friend-name.clickable { cursor: pointer; }
+  .friend-name .sub { display: block; font-size: 10px; color: var(--text-d); margin-top: 2px; }
+  .mini-btn {
+    flex-shrink: 0; background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-d); font-size: 11px; letter-spacing: 0.5px; padding: 0 12px; height: 34px;
+  }
+  .mini-btn.accent { background: var(--accent-dim); border-color: rgba(74,240,176,0.25); color: var(--accent-t); }
+  .mini-btn.danger:active { color: var(--danger); border-color: var(--danger); }
+  .mini-btn:active { opacity: 0.75; }
+  .mini-btn:disabled { opacity: 0.5; }
+  .mini-tag { flex-shrink: 0; font-size: 10px; color: var(--text-d); letter-spacing: 0.5px; padding: 0 4px; }
+  .empty { text-align: center; padding: 28px 0; color: var(--text-d); font-size: 12px; }
+  .form-msg { font-size: 11px; color: var(--text-d); min-height: 16px; margin: -6px 0 8px; }
+  .form-msg.err { color: var(--danger); }
 </style>
 </head>
 <body>
@@ -194,7 +235,6 @@
   <span class="nav-logo">LIFTLOG</span>
   <span class="nav-spacer"></span>
   <button class="nav-btn" id="btn-back" onclick="goBack()" style="display:none">← back</button>
-  <button class="nav-btn" id="btn-history" onclick="showView('history')">history</button>
   <button class="nav-btn" id="btn-logout" onclick="logout()">log out</button>
 </nav>
 
@@ -239,9 +279,40 @@
 
   <!-- SESSION DETAIL -->
   <div class="view" id="view-session-detail">
+    <div class="who" id="detail-who" style="display:none"></div>
     <div class="disp-lg" id="detail-title"></div>
     <div class="text-d" id="detail-sub" style="margin-bottom:20px;"></div>
     <div id="detail-exercises"></div>
+  </div>
+
+  <!-- FEED (friends' finished workouts) -->
+  <div class="view" id="view-feed">
+    <div class="disp-lg">FEED</div>
+    <div class="text-d" style="margin-bottom:16px;">your friends' finished workouts</div>
+    <div id="feed-list"></div>
+    <div id="feed-more"></div>
+  </div>
+
+  <!-- FRIENDS -->
+  <div class="view" id="view-friends">
+    <div class="disp-lg">FRIENDS</div>
+    <div class="section-label" style="margin-top:12px;">add a friend</div>
+    <input class="search-input" id="friend-search" type="text" placeholder="search username..."
+      autocapitalize="none" autocorrect="off" autocomplete="off" spellcheck="false" enterkeyhint="search"
+      oninput="onFriendSearch()" onkeydown="if(event.key==='Enter'){this.blur();}">
+    <div class="form-msg" id="friend-msg"></div>
+    <div id="friend-search-results"></div>
+    <div id="friends-incoming"></div>
+    <div id="friends-list"></div>
+    <div id="friends-outgoing"></div>
+  </div>
+
+  <!-- FRIEND HISTORY (read-only) -->
+  <div class="view" id="view-friend-history">
+    <div class="who" id="fh-who"></div>
+    <div class="disp-lg">HISTORY</div>
+    <div id="fh-list"></div>
+    <div id="fh-more"></div>
   </div>
 
   <!-- MANAGE EXERCISES -->
@@ -253,6 +324,13 @@
   </div>
 
 </div>
+
+<nav id="tabbar">
+  <button class="tab-btn active" id="tab-home" onclick="showView('home')">home</button>
+  <button class="tab-btn" id="tab-history" onclick="showView('history')">history</button>
+  <button class="tab-btn" id="tab-feed" onclick="showView('feed')">feed</button>
+  <button class="tab-btn" id="tab-friends" onclick="showView('friends')">friends<span class="tab-badge" id="friends-badge" style="display:none"></span></button>
+</nav>
 
 <!-- ADD EXERCISE OVERLAY -->
 <div id="overlay" onclick="overlayBgClick(event)">
@@ -273,6 +351,15 @@ let sessions  = [];   // completed Session[]
 let active    = null; // active Session | null
 let currentView = 'home';
 let detailSession = null;
+let detailOwner = null;      // null = my session; username = a friend's (read-only)
+let detailReturn = 'history'; // view to go back to from session detail
+
+// Friends state
+let friendsData = { friends: [], incoming: [], outgoing: [] };
+let searchResults = [];
+let feedItems = [], feedCursor = null;
+let fhUser = null, fhItems = [], fhCursor = null;
+const TAB_VIEWS = ['home', 'history', 'feed', 'friends'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return '_' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -297,16 +384,27 @@ function exerciseStats(exName) {
   };
 }
 function el(id) { return document.getElementById(id); }
+// Escape anything user-controlled before it goes into innerHTML. Friends'
+// exercise names / usernames are other people's input, so this matters.
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
-function showView(name) {
+function showView(name, opts = {}) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   el('view-' + name).classList.add('active');
   currentView = name;
-  el('btn-back').style.display = name === 'home' ? 'none' : '';
-  el('btn-history').style.display = name === 'history' ? 'none' : '';
-  el('btn-history').classList.toggle('active', name === 'history');
+  el('btn-back').style.display = TAB_VIEWS.includes(name) ? 'none' : '';
+  // Sub-views keep their parent tab highlighted
+  const tab = name === 'session-detail' ? (TAB_VIEWS.includes(detailReturn) ? detailReturn : 'friends')
+    : name === 'friend-history' ? 'friends'
+    : TAB_VIEWS.includes(name) ? name : 'home';
+  TAB_VIEWS.forEach(t => el('tab-' + t).classList.toggle('active', t === tab));
   if (name === 'home') renderHome();
+  if (name === 'feed') { if (opts.keep && feedItems.length) renderFeed(); else loadFeed(true); }
+  if (name === 'friends') loadFriends();
+  if (name === 'friend-history') renderFriendHistory();
   if (name === 'history') renderHistory();
   if (name === 'workout') renderWorkout();
   if (name === 'session-detail') renderDetail();
@@ -314,7 +412,8 @@ function showView(name) {
   window.scrollTo(0, 0);
 }
 function goBack() {
-  if (currentView === 'session-detail') { showView('history'); return; }
+  if (currentView === 'session-detail') { showView(detailReturn, { keep: true }); return; }
+  if (currentView === 'friend-history') { showView('friends'); return; }
   if (currentView === 'manage') { showView('home'); return; }
   showView('home');
 }
@@ -333,6 +432,7 @@ async function init() {
       GET('/sessions/active'),
     ]);
     renderHome();
+    refreshFriendsBadge();
   } catch (err) {
     console.error('Init failed:', err);
     el('recent-list').innerHTML = `<div class="loading">could not connect to server</div>`;
@@ -549,15 +649,27 @@ function renderHistory() {
 function openDetail(sessionId) {
   detailSession = sessions.find(s => s.id === sessionId);
   if (!detailSession) return;
+  detailOwner = null;
+  detailReturn = currentView === 'home' ? 'home' : 'history';
+  showView('session-detail');
+}
+// A friend's session (from the feed or their history) — same detail UI, read-only
+function openFriendDetail(sess, returnTo) {
+  detailSession = sess;
+  detailOwner = sess.username;
+  detailReturn = returnTo;
   showView('session-detail');
 }
 function renderDetail() {
   if (!detailSession) return;
+  el('detail-who').style.display = detailOwner ? '' : 'none';
+  el('detail-who').textContent = detailOwner ? '@' + detailOwner : '';
   el('detail-title').textContent = fmtDate(detailSession.startedAt);
   el('detail-sub').textContent = `${fmtTime(detailSession.startedAt)}${detailSession.finishedAt ? ' – ' + fmtTime(detailSession.finishedAt) : ''} · ${detailSession.exercises.reduce((a,e)=>a+e.sets.length,0)} total sets`;
 
   el('detail-exercises').innerHTML = (detailSession.exercises||[]).map(ex => {
-    const stats = exerciseStats(ex.name);
+    // All-time stats come from MY history, so only show them on my own sessions
+    const stats = detailOwner ? null : exerciseStats(ex.name);
     const allTimeHtml = stats ? `
       <div class="stat-row" style="margin-bottom:12px;">
         <div class="stat-tag"><span class="stat-label">all-time PR</span><span class="stat-val text-accent">${stats.maxWeight}lb</span></div>
@@ -566,8 +678,8 @@ function renderDetail() {
 
     const setRows = (ex.sets||[]).map((s, si) => `
       <div class="detail-cell">${si+1}</div>
-      <div class="detail-cell">${s.reps || '—'}</div>
-      <div class="detail-cell accent">${s.weight || '—'}</div>
+      <div class="detail-cell">${esc(s.reps || '—')}</div>
+      <div class="detail-cell accent">${esc(s.weight || '—')}</div>
       <div class="detail-cell dim">${s.savedAt ? fmtTime(s.savedAt) : '—'}</div>
     `).join('');
 
@@ -582,7 +694,7 @@ function renderDetail() {
 
     return `
       <div class="card" style="margin-bottom:14px;">
-        <div class="disp-md" style="margin-bottom:10px;">${ex.name}</div>
+        <div class="disp-md" style="margin-bottom:10px;">${esc(ex.name)}</div>
         ${allTimeHtml}
         <div class="detail-grid">
           <div class="detail-head">SET</div><div class="detail-head">REPS</div>
@@ -593,6 +705,214 @@ function renderDetail() {
       </div>`;
   }).join('');
 }
+
+
+// ─── Friends ──────────────────────────────────────────────────────────────────
+function sessionCard(s, onclick, showWho) {
+  const sets = (s.exercises||[]).reduce((a,e)=>a+(e.sets||[]).length,0);
+  return `
+    <div class="card clickable" onclick="${onclick}">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <div style="min-width:0;">
+          ${showWho ? `<div class="who">@${esc(s.username)}</div>` : ''}
+          <div class="disp-sm">${fmtDate(s.startedAt)}</div>
+          <div class="text-d">${fmtTime(s.startedAt)}${s.finishedAt ? ' → ' + fmtTime(s.finishedAt) : ''} · ${(s.exercises||[]).length} exercises · ${sets} sets</div>
+          <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${esc(e.name)}</span>`).join('')}</div>
+        </div>
+        <span style="color:var(--text-f); font-size:18px;">›</span>
+      </div>
+    </div>`;
+}
+function moreButton(fn) {
+  return `<button class="btn-ghost" onclick="${fn}()">load more</button>`;
+}
+
+function setFriendsBadge() {
+  const n = friendsData.incoming.length;
+  const b = el('friends-badge');
+  b.textContent = n;
+  b.style.display = n ? '' : 'none';
+}
+async function refreshFriendsBadge() {
+  try { friendsData = await GET('/friends'); setFriendsBadge(); } catch (err) { console.error(err); }
+}
+
+async function loadFriends() {
+  if (!el('friends-list').innerHTML) el('friends-list').innerHTML = `<div class="loading">loading…</div>`;
+  try {
+    friendsData = await GET('/friends');
+  } catch (err) {
+    el('friends-list').innerHTML = `<div class="empty">could not load friends</div>`;
+    return;
+  }
+  setFriendsBadge();
+  renderFriends();
+  if (el('friend-search').value.trim()) runFriendSearch();
+}
+
+function renderFriends() {
+  const { friends, incoming, outgoing } = friendsData;
+  el('friends-incoming').innerHTML = incoming.length ? `
+    <div class="section-label">requests</div>
+    ${incoming.map((r, i) => `
+      <div class="friend-row">
+        <div class="friend-name">${esc(r.username)}<span class="sub">wants to be friends</span></div>
+        <button class="mini-btn accent" onclick="acceptRequest(${i})">accept</button>
+        <button class="mini-btn danger" onclick="declineRequest(${i})">decline</button>
+      </div>`).join('')}` : '';
+
+  el('friends-list').innerHTML = `
+    <div class="section-label">friends</div>
+    ${friends.length ? friends.map((f, i) => `
+      <div class="friend-row">
+        <div class="friend-name clickable" onclick="openFriendHistory(${i})">${esc(f.username)}<span class="sub">view workouts ›</span></div>
+        <button class="mini-btn danger" onclick="removeFriend(${i})">remove</button>
+      </div>`).join('') : `<div class="empty">no friends yet — search for a username above</div>`}`;
+
+  el('friends-outgoing').innerHTML = outgoing.length ? `
+    <div class="section-label">sent requests</div>
+    ${outgoing.map((r, i) => `
+      <div class="friend-row">
+        <div class="friend-name">${esc(r.username)}<span class="sub">pending</span></div>
+        <button class="mini-btn" onclick="cancelRequest(${i})">cancel</button>
+      </div>`).join('')}` : '';
+}
+
+function friendMsg(text, isErr) {
+  el('friend-msg').textContent = text || '';
+  el('friend-msg').classList.toggle('err', !!isErr);
+}
+
+let searchTimer = null, searchSeq = 0;
+function onFriendSearch() {
+  friendMsg('');
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runFriendSearch, 250);
+}
+async function runFriendSearch() {
+  const q = el('friend-search').value.trim();
+  const seq = ++searchSeq;
+  if (!q) { searchResults = []; renderSearch(); return; }
+  try {
+    const res = await GET('/friends/search?q=' + encodeURIComponent(q));
+    if (seq !== searchSeq) return;   // a newer search superseded this one
+    searchResults = res;
+    renderSearch();
+  } catch (err) {
+    if (seq === searchSeq) friendMsg('search failed', true);
+  }
+}
+function renderSearch() {
+  const q = el('friend-search').value.trim();
+  const box = el('friend-search-results');
+  if (!q) { box.innerHTML = ''; return; }
+  if (!searchResults.length) {
+    box.innerHTML = `<div class="empty" style="padding:12px 0;">no user found${q.length < 2 ? ' — type at least 2 letters' : ''}</div>`;
+    return;
+  }
+  box.innerHTML = searchResults.map((r, i) => {
+    const action = r.status === 'none' ? `<button class="mini-btn accent" onclick="sendRequest(${i})">add</button>`
+      : r.status === 'incoming' ? `<button class="mini-btn accent" onclick="sendRequest(${i})">accept</button>`
+      : r.status === 'outgoing' ? `<span class="mini-tag">requested</span>`
+      : `<span class="mini-tag">friends ✓</span>`;
+    return `<div class="friend-row"><div class="friend-name">${esc(r.username)}</div>${action}</div>`;
+  }).join('');
+}
+
+async function friendAction(fn, okMsg) {
+  try {
+    await fn();
+    if (okMsg) friendMsg(okMsg);
+  } catch (err) {
+    friendMsg(err.status === 404 ? 'that request no longer exists'
+      : err.status === 409 ? 'already requested or friends'
+      : 'something went wrong — try again', true);
+  }
+  await loadFriends();
+}
+function sendRequest(i) {
+  const r = searchResults[i];
+  if (!r) return;
+  friendAction(async () => {
+    const res = await POST('/friends/requests', { username: r.username });
+    r.status = res.status;
+  }, r.status === 'incoming' ? `you and ${r.username} are now friends` : `request sent to ${r.username}`);
+}
+function acceptRequest(i) {
+  const r = friendsData.incoming[i];
+  if (r) friendAction(() => POST(`/friends/requests/${encodeURIComponent(r.username)}/accept`), `you and ${r.username} are now friends`);
+}
+function declineRequest(i) {
+  const r = friendsData.incoming[i];
+  if (r) friendAction(() => DELETE(`/friends/requests/${encodeURIComponent(r.username)}`));
+}
+function cancelRequest(i) {
+  const r = friendsData.outgoing[i];
+  if (r) friendAction(() => DELETE(`/friends/requests/${encodeURIComponent(r.username)}`));
+}
+function removeFriend(i) {
+  const f = friendsData.friends[i];
+  if (!f || !confirm(`Remove ${f.username} from your friends? You'll stop seeing each other's workouts.`)) return;
+  friendAction(() => DELETE(`/friends/${encodeURIComponent(f.username)}`));
+}
+
+// ─── Friend history (read-only) ──────────────────────────────────────────────
+function openFriendHistory(i) {
+  const f = friendsData.friends[i];
+  if (!f) return;
+  if (fhUser !== f.username) { fhUser = f.username; fhItems = []; fhCursor = null; }
+  showView('friend-history');
+  loadFriendHistory(true);
+}
+async function loadFriendHistory(reset) {
+  const user = fhUser;
+  if (reset && !fhItems.length) el('fh-list').innerHTML = `<div class="loading">loading…</div>`;
+  try {
+    const q = (!reset && fhCursor) ? '&before=' + encodeURIComponent(fhCursor) : '';
+    const res = await GET(`/friends/${encodeURIComponent(user)}/sessions?limit=20${q}`);
+    if (user !== fhUser) return;
+    fhItems = reset ? res.items : fhItems.concat(res.items);
+    fhCursor = res.nextCursor;
+    renderFriendHistory();
+  } catch (err) {
+    el('fh-list').innerHTML = `<div class="empty">${err.status === 404 ? 'you are no longer friends with this user' : 'could not load workouts'}</div>`;
+    el('fh-more').innerHTML = '';
+  }
+}
+function renderFriendHistory() {
+  el('fh-who').textContent = fhUser ? '@' + fhUser : '';
+  el('fh-list').innerHTML = fhItems.length
+    ? fhItems.map((s, i) => sessionCard(s, `openFhItem(${i})`, false)).join('')
+    : `<div class="empty">no finished workouts yet</div>`;
+  el('fh-more').innerHTML = fhCursor ? moreButton('loadMoreFriendHistory') : '';
+}
+function loadMoreFriendHistory() { loadFriendHistory(false); }
+function openFhItem(i) { if (fhItems[i]) openFriendDetail(fhItems[i], 'friend-history'); }
+
+// ─── Feed ─────────────────────────────────────────────────────────────────────
+async function loadFeed(reset) {
+  if (reset && !feedItems.length) el('feed-list').innerHTML = `<div class="loading">loading…</div>`;
+  try {
+    const q = (!reset && feedCursor) ? '&before=' + encodeURIComponent(feedCursor) : '';
+    const res = await GET(`/feed?limit=20${q}`);
+    feedItems = reset ? res.items : feedItems.concat(res.items);
+    feedCursor = res.nextCursor;
+    renderFeed();
+  } catch (err) {
+    el('feed-list').innerHTML = `<div class="empty">could not load feed</div>`;
+    el('feed-more').innerHTML = '';
+  }
+}
+function renderFeed() {
+  el('feed-list').innerHTML = feedItems.length
+    ? feedItems.map((s, i) => sessionCard(s, `openFeedItem(${i})`, true)).join('')
+    : `<div class="empty">${friendsData.friends.length
+        ? 'no finished workouts from your friends yet'
+        : 'nothing here yet — add friends to see their finished workouts'}</div>`;
+  el('feed-more').innerHTML = feedCursor ? moreButton('loadMoreFeed') : '';
+}
+function loadMoreFeed() { loadFeed(false); }
+function openFeedItem(i) { if (feedItems[i]) openFriendDetail(feedItems[i], 'feed'); }
 
 // ─── Render: Manage ───────────────────────────────────────────────────────────
 function renderManage() {
@@ -677,6 +997,8 @@ Object.assign(window, {
   addSet, saveSet, removeSet, updateSetField,
   openOverlay, renderOverlay, overlayBgClick, openDetail, renderManage,
   logout,
+  onFriendSearch, sendRequest, acceptRequest, declineRequest, cancelRequest, removeFriend,
+  openFriendHistory, loadMoreFriendHistory, openFhItem, loadMoreFeed, openFeedItem,
 });
 
 // ─── Boot: require a valid token before loading the app ───────────────────────

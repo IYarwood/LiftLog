@@ -15,12 +15,13 @@ afterEach(() => mock.restoreAll());
 for (const [method, path] of [
   ['get', '/api/exercises'],
   ['post', '/api/exercises'],
+  ['patch', '/api/exercises/Squat'],
   ['delete', '/api/exercises/Squat'],
 ]) {
   test(`${method.toUpperCase()} ${path} without a token is 401`, async () => {
     const q = mock.method(pool, 'query', async () => ({ rows: [] }));
     const req = request(app)[method](path);
-    const res = method === 'post' ? await req.send({ name: 'x' }) : await req;
+    const res = (method === 'post' || method === 'patch') ? await req.send({ name: 'x' }) : await req;
     assert.strictEqual(res.status, 401);
     assert.strictEqual(q.mock.callCount(), 0);
   });
@@ -28,7 +29,7 @@ for (const [method, path] of [
   test(`${method.toUpperCase()} ${path} with an invalid token is 401`, async () => {
     const q = mock.method(pool, 'query', async () => ({ rows: [] }));
     const req = request(app)[method](path).set('Authorization', 'Bearer not-a-jwt');
-    const res = method === 'post' ? await req.send({ name: 'x' }) : await req;
+    const res = (method === 'post' || method === 'patch') ? await req.send({ name: 'x' }) : await req;
     assert.strictEqual(res.status, 401);
     assert.strictEqual(q.mock.callCount(), 0);
   });
@@ -92,4 +93,48 @@ test('POST /api/exercises stores HTML-ish names verbatim (escaping is the render
   const res = await auth(request(app).post('/api/exercises')).send({ name });
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(captured, [name]);
+});
+
+// ─── Validation on rename (same rules as create) ──────────────────────────────
+for (const [label, body] of [
+  ['missing name', {}],
+  ['empty name', { name: '' }],
+  ['whitespace-only name', { name: '   ' }],
+  ['non-string name', { name: 5 }],
+  ['61-char name', { name: 'z'.repeat(61) }],
+]) {
+  test(`PATCH /api/exercises/:name rejects ${label} with 400 and no DB access`, async () => {
+    const q = mock.method(pool, 'query', async () => ({ rows: [] }));
+    const res = await auth(request(app).patch('/api/exercises/Squat')).send(body);
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(q.mock.callCount(), 0);
+  });
+}
+
+test('PATCH /api/exercises/:name trims the new name and updates only the library', async () => {
+  const calls = [];
+  mock.method(pool, 'query', async (sql, params) => {
+    calls.push({ sql, params });
+    if (/SELECT id FROM exercises/.test(sql)) return { rows: [{ id: 3 }] };
+    if (/UPDATE/.test(sql)) return { rows: [], rowCount: 1 };
+    return { rows: [] };
+  });
+  const res = await auth(request(app).patch('/api/exercises/Leg%20Press')).send({ name: '  Hack Squat ' });
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body, { ok: true, name: 'Hack Squat' });
+  assert.deepStrictEqual(calls[0].params, ['Leg Press']);
+  const upd = calls.find(c => /UPDATE/.test(c.sql));
+  assert.match(upd.sql, /UPDATE exercises SET name/);
+  assert.deepStrictEqual(upd.params, ['Hack Squat', 3]);
+  assert.ok(calls.every(c => !/session_exercises/.test(c.sql)), 'must not touch session_exercises');
+});
+
+test('PATCH /api/exercises/:name maps a unique violation race to 409', async () => {
+  mock.method(pool, 'query', async (sql) => {
+    if (/SELECT id FROM exercises/.test(sql)) return { rows: [{ id: 3 }] };
+    if (/UPDATE/.test(sql)) { const e = new Error('dup'); e.code = '23505'; throw e; }
+    return { rows: [] };
+  });
+  const res = await auth(request(app).patch('/api/exercises/Squat')).send({ name: 'Bench Press' });
+  assert.strictEqual(res.status, 409);
 });

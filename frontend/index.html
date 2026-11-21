@@ -117,7 +117,7 @@
   .set-num.saved { color: var(--accent-t); }
   .set-input {
     background: var(--card); border: 1px solid var(--border); border-radius: 6px;
-    padding: 10px 4px; color: var(--text); font-family: var(--mono); font-size: 15px;
+    padding: 10px 4px; color: var(--text); font-family: var(--mono); font-size: 16px;
     text-align: center; width: 100%; transition: border-color 0.15s;
   }
   .set-input.saved { background: transparent; border-color: transparent; }
@@ -140,7 +140,7 @@
   .detail-cell.dim { color: var(--text-d); font-size: 10px; }
 
   #overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: none; position: fixed; top: 0; left: 0; right: 0; height: 100%; background: rgba(0,0,0,0.7);
     z-index: 200; flex-direction: column; justify-content: flex-end;
   }
   #overlay.open { display: flex; }
@@ -148,7 +148,7 @@
     background: var(--surface); border-top: 1px solid var(--border);
     border-radius: 16px 16px 0 0; padding: 20px;
     padding-bottom: calc(var(--safe-bot) + 20px);
-    max-height: 72vh; overflow-y: auto;
+    max-height: min(72vh, 92%); overflow-y: auto;
     animation: slideUp 0.25s ease;
   }
   @keyframes slideUp { from { transform: translateY(100%); } to { transform: none; } }
@@ -179,7 +179,7 @@
   .search-input {
     width: 100%; background: var(--card); border: 1px solid var(--border);
     border-radius: 8px; padding: 11px 14px; color: var(--text); font-family: var(--mono);
-    font-size: 13px; margin-bottom: 14px;
+    font-size: 16px; margin-bottom: 14px;
   }
 
   #in-progress-banner { display: none; }
@@ -613,13 +613,34 @@ async function removeExercise_lib(name) {
 }
 
 // ─── Overlay ──────────────────────────────────────────────────────────────────
+// Keep the overlay sized to the *visible* viewport so the iOS keyboard
+// doesn't cover the bottom sheet (position:fixed tracks the layout viewport).
+function fitOverlayToViewport() {
+  const vv = window.visualViewport, o = el('overlay');
+  if (!vv) return;
+  o.style.top = vv.offsetTop + 'px';
+  o.style.height = vv.height + 'px';
+}
 function openOverlay() {
   el('ex-filter').value = '';
   renderOverlay();
   el('overlay').classList.add('open');
+  if (window.visualViewport) {
+    visualViewport.addEventListener('resize', fitOverlayToViewport);
+    visualViewport.addEventListener('scroll', fitOverlayToViewport);
+    fitOverlayToViewport();
+  }
   setTimeout(() => el('ex-filter').focus(), 100);
 }
-function closeOverlay() { el('overlay').classList.remove('open'); }
+function closeOverlay() {
+  el('overlay').classList.remove('open');
+  if (window.visualViewport) {
+    visualViewport.removeEventListener('resize', fitOverlayToViewport);
+    visualViewport.removeEventListener('scroll', fitOverlayToViewport);
+  }
+  el('overlay').style.top = '';
+  el('overlay').style.height = '';
+}
 function overlayBgClick(e) { if (e.target === el('overlay')) closeOverlay(); }
 
 function renderOverlay() {

@@ -23,13 +23,13 @@ async function ownsSessionExercise(sessionId, exId, userId) {
 // callers that already hold the row (the list route).
 async function hydrateSession(sess) {
   const exRes = await pool.query(
-    'SELECT * FROM session_exercises WHERE session_id = $1 ORDER BY position ASC',
+    'SELECT * FROM session_exercises WHERE session_id = $1 ORDER BY position ASC, created_at ASC, id ASC',
     [sess.id]
   );
 
   const exercises = await Promise.all(exRes.rows.map(async (ex) => {
     const setRes = await pool.query(
-      'SELECT * FROM sets WHERE session_exercise_id = $1 ORDER BY position ASC',
+      'SELECT * FROM sets WHERE session_exercise_id = $1 ORDER BY position ASC, created_at ASC, id ASC',
       [ex.id]
     );
     return {
@@ -142,7 +142,10 @@ router.patch('/:id/finish', async (req, res) => {
 });
 
 // POST /api/sessions/:id/exercises — add an exercise to this user's session
-// body: { id: string, name: string (trimmed; 1–60 chars), position: number }
+// body: { id: string, name: string (trimmed; 1–60 chars) }
+// `position` is assigned here as (highest in the session) + 1, so removing an
+// exercise never frees a slot that a later add would reuse. A client-sent
+// `position` is ignored (older clients sent their local count, which repeated).
 // An exercise appears at most once per session, compared ignoring case:
 //   - 409 { error, id, name } if the session already has that name under a
 //     different id (id/name = the existing entry, so the client can jump to it).
@@ -152,7 +155,7 @@ router.patch('/:id/finish', async (req, res) => {
 // The session row is locked (FOR UPDATE) for the check + insert, so two
 // concurrent adds of the same name to one session can't both get in.
 router.post('/:id/exercises', async (req, res) => {
-  const { id, position } = req.body;
+  const { id } = req.body;
   if (!id) return res.status(400).json({ error: 'id required' });
   const { name, error } = parseExerciseName(req.body.name);
   if (error) return res.status(400).json({ error });
@@ -186,9 +189,12 @@ router.post('/:id/exercises', async (req, res) => {
         name: dup.rows[0].name,
       });
     }
+    // Session row is locked, so MAX is stable for this insert.
     await client.query(
-      'INSERT INTO session_exercises (id, session_id, name, position) VALUES ($1, $2, $3, $4)',
-      [id, req.params.id, name, position ?? 0]
+      `INSERT INTO session_exercises (id, session_id, name, position)
+       SELECT $1, $2, $3, COALESCE(MAX(position) + 1, 0)
+         FROM session_exercises WHERE session_id = $2`,
+      [id, req.params.id, name]
     );
     await client.query('COMMIT');
     res.json({ ok: true, id });
@@ -219,17 +225,22 @@ router.delete('/:id/exercises/:exId', async (req, res) => {
 });
 
 // POST /api/sessions/:id/exercises/:exId/sets — add a set
-// body: { id: string, position: number }
+// body: { id: string }
+// `position` is (highest in the exercise) + 1, assigned here for the same reason
+// as exercises; a client-sent `position` is ignored. Two truly concurrent adds
+// could tie, which the created_at/id tiebreak in the read query orders stably.
 router.post('/:id/exercises/:exId/sets', async (req, res) => {
-  const { id, position } = req.body;
+  const { id } = req.body;
   if (!id) return res.status(400).json({ error: 'id required' });
   try {
     if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
       return res.status(404).json({ error: 'Not found' });
     }
     await pool.query(
-      'INSERT INTO sets (id, session_exercise_id, position) VALUES ($1, $2, $3)',
-      [id, req.params.exId, position ?? 0]
+      `INSERT INTO sets (id, session_exercise_id, position)
+       SELECT $1, $2, COALESCE(MAX(position) + 1, 0)
+         FROM sets WHERE session_exercise_id = $2`,
+      [id, req.params.exId]
     );
     res.json({ ok: true, id });
   } catch (err) {

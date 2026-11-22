@@ -15,13 +15,13 @@ async function hydrateSessions(rows) {
   const ids = rows.map(r => r.id);
 
   const exRes = await pool.query(
-    'SELECT * FROM session_exercises WHERE session_id = ANY($1) ORDER BY position ASC, created_at ASC',
+    'SELECT * FROM session_exercises WHERE session_id = ANY($1) ORDER BY position ASC, created_at ASC, id ASC',
     [ids]
   );
   const exIds = exRes.rows.map(e => e.id);
   const setRes = exIds.length
     ? await pool.query(
-        'SELECT * FROM sets WHERE session_exercise_id = ANY($1) ORDER BY position ASC, created_at ASC',
+        'SELECT * FROM sets WHERE session_exercise_id = ANY($1) ORDER BY position ASC, created_at ASC, id ASC',
         [exIds]
       )
     : { rows: [] };

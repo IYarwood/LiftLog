@@ -1,5 +1,6 @@
 // Integration tests for exercises inside a session, against the REAL test DB:
-// one-exercise-per-session (case-insensitive 409) and idempotent re-sends.
+// one-exercise-per-session (case-insensitive 409), idempotent re-sends,
+// numeric weights, and stable exercise/set order after removals.
 // Every row this file creates belongs to a "zzsx_" user and is removed
 // afterwards (sessions/exercises/sets cascade from the user).
 // Safety: only runs when DATABASE_URL points at a database whose name ends in
@@ -136,6 +137,55 @@ describe('session exercises (integration, real test DB)', { skip }, () => {
     const row = (await pool.query('SELECT * FROM sessions WHERE id = $1', [sid])).rows[0];
     const [h] = await hydrateSessions([row]);
     assert.deepStrictEqual(h.exercises[0].sets.map(s => s.weight), weights);
+  });
+
+  const names = async (sid) => (await getSession(sid)).exercises.map(e => e.name);
+  const delEx = (sid, exId) => authed(request(app).delete(`/api/sessions/${sid}/exercises/${exId}`));
+
+  test('removing exercises never lets a new one jump ahead (positions are MAX + 1)', async () => {
+    const sid = await newSession();
+    // The old client sent position = its current count, which repeats after a
+    // removal; the server must ignore it.
+    await addEx(sid, ID('o1'), 'A', 0);
+    await addEx(sid, ID('o2'), 'B', 1);
+    await addEx(sid, ID('o3'), 'C', 2);
+    await delEx(sid, ID('o1'));
+    await delEx(sid, ID('o2'));
+    await addEx(sid, ID('o4'), 'D', 1);   // stale client position 1 < C's 2
+    await addEx(sid, ID('o5'), 'E', 0);
+    assert.deepStrictEqual(await names(sid), ['C', 'D', 'E']);
+    const pos = (await pool.query(
+      'SELECT name, position FROM session_exercises WHERE session_id = $1 ORDER BY position', [sid]
+    )).rows;
+    assert.deepStrictEqual(pos.map(r => r.position), [2, 3, 4]);
+  });
+
+  test('order is stable across reloads even when legacy rows share a position', async () => {
+    const sid = await newSession();
+    // Legacy data written by the old client: equal positions, inserted in order.
+    for (const [i, n] of ['P', 'Q', 'R', 'S'].entries()) {
+      await pool.query(
+        `INSERT INTO session_exercises (id, session_id, name, position, created_at)
+         VALUES ($1, $2, $3, 1, NOW() + ($4 || ' seconds')::interval)`,
+        [ID('leg' + i), sid, n, String(i)]
+      );
+    }
+    for (let k = 0; k < 5; k++) assert.deepStrictEqual(await names(sid), ['P', 'Q', 'R', 'S']);
+    const { hydrateSessions } = require('../src/db/hydrate');
+    const row = (await pool.query('SELECT * FROM sessions WHERE id = $1', [sid])).rows[0];
+    assert.deepStrictEqual((await hydrateSessions([row]))[0].exercises.map(e => e.name), ['P', 'Q', 'R', 'S']);
+  });
+
+  test('sets keep their order after removals too', async () => {
+    const sid = await newSession();
+    await addEx(sid, ID('so'), 'Squat');
+    const base = `/api/sessions/${sid}/exercises/${ID('so')}/sets`;
+    for (const i of [0, 1, 2]) await authed(request(app).post(base)).send({ id: ID('set' + i), position: i });
+    await authed(request(app).delete(`${base}/${ID('set0')}`));
+    await authed(request(app).delete(`${base}/${ID('set1')}`));
+    await authed(request(app).post(base)).send({ id: ID('set3'), position: 1 });   // stale position
+    const sets = (await getSession(sid)).exercises[0].sets.map(s => s.id);
+    assert.deepStrictEqual(sets, [ID('set2'), ID('set3')]);
   });
 
   test("another user's session → 404", async () => {

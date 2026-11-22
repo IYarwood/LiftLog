@@ -191,9 +191,9 @@ All `/api/sessions/*` routes now require `Authorization: Bearer <token>`.
 | GET | `/api/sessions/:id` | — | Single session, full shape |
 | POST | `/api/sessions` | `{ id, startedAt }` | Start session |
 | PATCH | `/api/sessions/:id/finish` | — | Sets finished_at = NOW() |
-| POST | `/api/sessions/:id/exercises` | `{ id, name, position }` | Add exercise to session |
+| POST | `/api/sessions/:id/exercises` | `{ id, name }` | Add exercise to session. Position = last + 1 (server-assigned; a sent `position` is ignored). **409** `{ error, id, name }` if the session already has that name ignoring case; re-sending the same `{ id, name }` is a 200 no-op |
 | DELETE | `/api/sessions/:id/exercises/:exId` | — | Remove exercise |
-| POST | `/api/sessions/:id/exercises/:exId/sets` | `{ id, position }` | Add empty set |
+| POST | `/api/sessions/:id/exercises/:exId/sets` | `{ id }` | Add empty set. Position = last + 1 (server-assigned) |
 | PATCH | `/api/sessions/:id/exercises/:exId/sets/:setId` | `{ reps?, weight?, savedAt? }` | Update set fields |
 | DELETE | `/api/sessions/:id/exercises/:exId/sets/:setId` | — | Remove set |
 

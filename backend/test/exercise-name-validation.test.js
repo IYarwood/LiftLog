@@ -76,7 +76,8 @@ test('POST /api/sessions/:id/exercises adds a library exercise unchanged', async
   const res = await auth(request(app).post('/api/sessions/s1/exercises'))
     .send({ id: 'ex1', name: 'Bench Press', position: 2 });
   assert.strictEqual(res.status, 200);
-  assert.deepStrictEqual(insert().params, ['ex1', 's1', 'Bench Press', 2]);
+  // position is assigned server-side (MAX + 1), the client's value is ignored
+  assert.deepStrictEqual(insert().params, ['ex1', 's1', 'Bench Press']);
 });
 
 test('POST /api/sessions/:id/exercises trims the name before inserting', async () => {

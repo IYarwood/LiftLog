@@ -378,6 +378,7 @@
 
 <script type="module">
 import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
+import { createSaveQueue } from './js/saveQueue.js?v=dev';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let exercises = [];   // string[]
@@ -549,9 +550,21 @@ async function addExerciseToSession(name) {
 }
 
 async function reloadActive() {
+  // Send typed-but-unsent set edits first, so the server copy includes them.
+  await setSaves.flushAll();
   try {
     const fresh = await GET('/sessions/active');
-    if (fresh && active && fresh.id === active.id) active = fresh;
+    if (fresh && active && fresh.id === active.id) {
+      // Anything still unsent (a save failed) stays visible instead of being
+      // replaced by the older server value.
+      for (const ex of fresh.exercises || []) {
+        for (const st of ex.sets || []) {
+          const f = setSaves.pendingFields(st.id);
+          if (f) for (const [k, v] of Object.entries(f)) st[k] = v ?? '';
+        }
+      }
+      active = fresh;
+    }
   } catch (err) { console.error(err); }
   renderWorkout();
 }
@@ -572,6 +585,8 @@ function focusExerciseCard(exId) {
 
 async function removeExercise(exId) {
   await DELETE(`/sessions/${active.id}/exercises/${exId}`);
+  const gone = active.exercises.find(e => e.id === exId);
+  (gone ? gone.sets : []).forEach(st => setSaves.drop(st.id));
   active.exercises = active.exercises.filter(e => e.id !== exId);
   renderWorkout();
 }
@@ -586,20 +601,19 @@ async function addSet(exId) {
   renderWorkout();
 }
 
-// updateSetField: debounced PATCH — saves as you type
-const debounceTimers = {};
+// updateSetField: debounced PATCH — saves as you type (600ms, see js/saveQueue.js).
+// The target ids are captured now, and setSaves.flushAll() pushes anything
+// pending before the workout is reloaded or finished.
+const setSaves = createSaveQueue(({ sessionId, exId, setId }, fields) =>
+  PATCH(`/sessions/${sessionId}/exercises/${exId}/sets/${setId}`, fields));
 function updateSetField(exId, setId, field, val) {
+  if (!active) return;
   const ex = active.exercises.find(e => e.id === exId);
   if (!ex) return;
   const s = ex.sets.find(s => s.id === setId);
   if (!s) return;
   s[field] = val;
-  // Debounce API call by 600ms so we don't hammer the server on every keystroke
-  clearTimeout(debounceTimers[setId]);
-  debounceTimers[setId] = setTimeout(() => {
-    PATCH(`/sessions/${active.id}/exercises/${exId}/sets/${setId}`, { [field]: val || null })
-      .catch(err => console.error('Set update failed:', err));
-  }, 600);
+  setSaves.schedule(setId, { sessionId: active.id, exId, setId }, { [field]: val || null });
 }
 
 async function saveSet(exId, setId) {
@@ -615,11 +629,13 @@ async function saveSet(exId, setId) {
     weight: s.weight,
     savedAt: s.savedAt,
   });
+  setSaves.drop(setId);   // this PATCH carried every field
   renderWorkout(setId);
 }
 
 async function removeSet(exId, setId) {
   await DELETE(`/sessions/${active.id}/exercises/${exId}/sets/${setId}`);
+  setSaves.drop(setId);
   const ex = active.exercises.find(e => e.id === exId);
   if (!ex) return;
   ex.sets = ex.sets.filter(s => s.id !== setId);

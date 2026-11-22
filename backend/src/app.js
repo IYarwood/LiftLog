@@ -32,6 +32,7 @@ app.use('/api/exercises', requireAuth, require('./routes/exercises'));
 app.use('/api/sessions', requireAuth, require('./routes/sessions'));
 app.use('/api/friends', requireAuth, require('./routes/friends'));
 app.use('/api/feed', requireAuth, require('./routes/feed'));
+app.use('/api/leaderboard', requireAuth, require('./routes/leaderboard'));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

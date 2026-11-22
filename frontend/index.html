@@ -258,6 +258,52 @@
   .empty { text-align: center; padding: 28px 0; color: var(--text-d); font-size: 12px; }
   .form-msg { font-size: 11px; color: var(--text-d); min-height: 16px; margin: -6px 0 8px; }
   .form-msg.err { color: var(--danger); }
+
+  /* Five tabs at 320px are 64px wide: keep the friends badge inside its tab. */
+  @media (max-width: 360px) {
+    .tab-badge { left: auto; right: 3px; top: 4px; }
+  }
+
+  /* Leaderboard */
+  .seg { display: flex; gap: 3px; padding: 3px; margin: 12px 0 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+  .seg-btn {
+    flex: 1; min-width: 0; min-height: 44px; background: none; border: none; border-radius: 7px;
+    color: var(--text-d); font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+  }
+  .seg-btn.active { background: var(--accent-dim); color: var(--accent-t); }
+  .seg-btn:active { opacity: 0.75; }
+  .lb-period { font-size: 12px; color: var(--text); margin-bottom: 2px; }
+  .lb-rules { font-size: 10px; color: var(--text-d); line-height: 1.5; margin-bottom: 14px; }
+  .lb-row {
+    width: 100%; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 10px 12px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px;
+    color: var(--text); font-size: 14px; text-align: left;
+  }
+  .lb-row:active { border-color: var(--border-h); }
+  .lb-row.you { border-color: rgba(74,240,176,0.4); background: #0f1f19; }
+  .lb-row.open { border-radius: 10px 10px 0 0; margin-bottom: 0; }
+  .lb-rank { flex-shrink: 0; width: 26px; text-align: center; font-family: var(--disp); font-size: 20px; color: var(--text-d); }
+  .lb-rank.first { color: var(--accent-t); }
+  .lb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-name .sub { display: block; font-size: 10px; color: var(--text-d); margin-top: 2px; white-space: normal; overflow-wrap: anywhere; }
+  .lb-name .lb-you { color: var(--accent-t); letter-spacing: 1px; }
+  .lb-pts { flex-shrink: 0; font-family: var(--disp); font-size: 22px; letter-spacing: 1px; }
+  .lb-pts small { font-family: var(--mono); font-size: 9px; color: var(--text-d); letter-spacing: 0.5px; margin-left: 2px; }
+  .lb-chev { flex-shrink: 0; color: var(--text-f); font-size: 16px; }
+  .lb-ex-name { display: block; font-family: var(--disp); font-size: 18px; letter-spacing: 1px; overflow-wrap: anywhere; word-break: break-word; }
+  .lb-detail {
+    margin-bottom: 8px; padding: 4px 12px 8px; background: var(--surface);
+    border: 1px solid var(--border); border-top: none; border-radius: 0 0 10px 10px;
+  }
+  .lb-line { display: flex; align-items: flex-start; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .lb-line:last-child { border-bottom: none; }
+  .lb-line.you { color: var(--accent-t); }
+  .lb-line .main { flex: 1; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+  .lb-line .sub { display: block; font-size: 10px; color: var(--text-d); margin-top: 2px; }
+  .lb-line .val { flex-shrink: 0; font-family: var(--disp); font-size: 17px; letter-spacing: 1px; text-align: right; }
+  .lb-line .val.zero { color: var(--text-d); }
+  .lb-cta { text-align: center; padding: 18px 12px; margin-bottom: 14px; }
+  .lb-cta .btn-secondary { margin: 12px 0 0; min-height: 44px; }
 </style>
 </head>
 <body>
@@ -347,6 +393,22 @@
     <div id="fh-more"></div>
   </div>
 
+  <!-- LEADERBOARD (viewer + accepted friends) -->
+  <div class="view" id="view-leaderboard">
+    <div class="disp-lg">LEADERBOARD</div>
+    <div class="seg" id="lb-seg">
+      <button class="seg-btn active" data-board="week">weekly</button>
+      <button class="seg-btn" data-board="month">monthly</button>
+      <button class="seg-btn" data-board="strength">strength</button>
+    </div>
+    <div id="lb-cta"></div>
+    <div id="lb-head"></div>
+    <input class="search-input" id="lb-filter" type="text" maxlength="60" placeholder="filter exercises..."
+      autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" style="display:none"
+      oninput="renderLeaderboard()" onkeydown="if(event.key==='Enter'){this.blur();}">
+    <div id="lb-list"></div>
+  </div>
+
   <!-- MANAGE EXERCISES -->
   <div class="view" id="view-manage">
     <div class="disp-lg">EXERCISES</div>
@@ -369,6 +431,7 @@
   <button class="tab-btn" id="tab-history" onclick="showView('history')">history</button>
   <button class="tab-btn" id="tab-feed" onclick="showView('feed')">feed</button>
   <button class="tab-btn" id="tab-friends" onclick="showView('friends')">friends<span class="tab-badge" id="friends-badge" style="display:none"></span></button>
+  <button class="tab-btn" id="tab-leaderboard" onclick="showView('leaderboard')" aria-label="leaderboard">ranks</button>
 </nav>
 
 <!-- ADD EXERCISE OVERLAY -->
@@ -403,7 +466,7 @@ let friendsData = { friends: [], incoming: [], outgoing: [] };
 let searchResults = [];
 let feedItems = [], feedCursor = null;
 let fhUser = null, fhItems = [], fhCursor = null;
-const TAB_VIEWS = ['home', 'history', 'feed', 'friends'];
+const TAB_VIEWS = ['home', 'history', 'feed', 'friends', 'leaderboard'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return '_' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -471,6 +534,7 @@ function showView(name, opts = {}) {
   if (name === 'workout') renderWorkout();
   if (name === 'session-detail') renderDetail();
   if (name === 'manage') loadManage();
+  if (name === 'leaderboard') loadLeaderboard();
   window.scrollTo(0, 0);
 }
 function goBack() {
@@ -1119,6 +1183,194 @@ function renderFeed() {
 function loadMoreFeed() { loadFeed(false); }
 function openFeedItem(i) { if (feedItems[i]) openFriendDetail(feedItems[i], 'feed'); }
 
+// ─── Leaderboard ──────────────────────────────────────────────────────────────
+// Boards come from /api/leaderboard/*: the server decides who is on them (you +
+// accepted friends) and which workouts count (finished only). Everything
+// user-controlled (usernames, exercise names) goes through esc().
+let lbBoard = 'week';           // 'week' | 'month' | 'strength'
+const lbData = {};              // board -> last response
+const lbOpen = {};              // board -> open row key (username / exercise key)
+const lbDetail = {};            // lowercased exercise name -> strength detail response
+let lbSeq = 0;
+
+const LB_STATUS = {
+  new: 'first time: sets your baseline',
+  'no-gain': 'no gain on baseline',
+  ignored: 'jump too big, ignored',
+  capped: 'capped',
+  scored: '',
+};
+
+function fmtDay(ymd) {   // 'YYYY-MM-DD' (a local date in the board's timezone)
+  return new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', timeZone:'UTC' });
+}
+function fmtShortDate(iso) {
+  const d = new Date(iso);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('en-US', sameYear ? { month:'short', day:'numeric' } : { month:'short', day:'numeric', year:'numeric' });
+}
+function resetsIn(endIso) {
+  const ms = new Date(endIso) - Date.now();
+  if (ms <= 0) return 'resetting now';
+  const mins = Math.floor(ms / 60000), h = Math.floor(mins / 60), d = Math.floor(h / 24);
+  if (d >= 1) return `resets in ${d}d ${h % 24}h`;
+  if (h >= 1) return `resets in ${h}h ${mins % 60}m`;
+  return `resets in ${Math.max(1, mins)}m`;
+}
+const fmtNum = (n) => (n === null || n === undefined) ? '—' : String(Math.round(n * 10) / 10);
+
+function setLbBoard(board) {
+  if (!['week', 'month', 'strength'].includes(board)) return;
+  lbBoard = board;
+  document.querySelectorAll('#lb-seg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.board === board));
+  loadLeaderboard();
+}
+
+async function loadLeaderboard() {
+  const board = lbBoard;
+  const seq = ++lbSeq;
+  if (lbData[board]) renderLeaderboard();
+  else { el('lb-cta').innerHTML = ''; el('lb-head').innerHTML = ''; el('lb-filter').style.display = 'none'; el('lb-list').innerHTML = `<div class="loading">loading…</div>`; }
+  try {
+    const path = board === 'week' ? '/leaderboard/weekly' : board === 'month' ? '/leaderboard/monthly' : '/leaderboard/strength';
+    const res = await GET(path);
+    if (seq !== lbSeq) return;   // switched boards meanwhile
+    lbData[board] = res;
+    if (board === 'strength') for (const k of Object.keys(lbDetail)) delete lbDetail[k];
+    renderLeaderboard();
+    // Re-fetch an already open strength exercise so it isn't stale.
+    if (board === 'strength' && lbOpen.strength) loadStrengthDetail(lbOpen.strength);
+  } catch (err) {
+    if (seq !== lbSeq) return;
+    if (!lbData[board]) el('lb-list').innerHTML = `<div class="empty">could not load leaderboard</div>`;
+  }
+}
+
+function renderLeaderboard() {
+  if (currentView !== 'leaderboard') return;
+  const data = lbData[lbBoard];
+  if (!data) return;
+  el('lb-cta').innerHTML = data.hasFriends ? '' : `
+    <div class="card lb-cta">
+      <div class="disp-md">ADD FRIENDS TO COMPETE</div>
+      <div class="text-d">only you and your accepted friends appear here</div>
+      <button class="btn-secondary" onclick="showView('friends')">FIND FRIENDS</button>
+    </div>`;
+  if (lbBoard === 'strength') renderStrength(data);
+  else renderPoints(data);
+}
+
+function renderPoints(data) {
+  el('lb-filter').style.display = 'none';
+  const word = data.period === 'week' ? 'week' : 'month';
+  const r = data.rules;
+  el('lb-head').innerHTML = `
+    <div class="lb-period">${esc(fmtDay(data.startDate))} – ${esc(fmtDay(data.endDate))} · <span class="text-accent">${esc(resetsIn(data.end))}</span></div>
+    <div class="lb-rules">+1% on your best estimated 1RM vs your last ${r.baselineWeeks} weeks = ${r.pointsPerPercent} pts (max ${r.progressCap} per exercise) · ${r.pointsPerDay} pts per workout day (max ${r.daysCap}) · tap a row for details</div>`;
+  const noPoints = data.entries.every(e => e.total === 0);
+  el('lb-list').innerHTML = (noPoints
+      ? `<div class="empty" style="padding:4px 0 14px;">no points yet this ${word} — finish a workout to get on the board</div>` : '')
+    + data.entries.map(e => {
+      const open = lbOpen[lbBoard] === e.username;
+      return `
+      <button class="lb-row${e.isYou ? ' you' : ''}${open ? ' open' : ''}" data-key="${esc(e.username)}">
+        <span class="lb-rank${e.rank === 1 && e.total > 0 ? ' first' : ''}">${e.rank}</span>
+        <span class="lb-name">@${esc(e.username)}${e.isYou ? '<span class="sub lb-you">you</span>' : ''}</span>
+        <span class="lb-pts">${e.total}<small>pts</small></span>
+        <span class="lb-chev">${open ? '▾' : '›'}</span>
+      </button>
+      ${open ? pointsBreakdown(e, data) : ''}`;
+    }).join('');
+}
+
+function pointsBreakdown(e, data) {
+  const c = e.consistency;
+  const dayWord = (n) => n === 1 ? 'day' : 'days';
+  const consistency = `
+    <div class="lb-line">
+      <span class="main">consistency<span class="sub">${c.days} workout ${dayWord(c.days)}${c.days > c.countedDays ? ` (max ${c.countedDays} count)` : ''} × ${data.rules.pointsPerDay}</span></span>
+      <span class="val${c.points ? '' : ' zero'}">${c.points}</span>
+    </div>`;
+  const lifts = e.exercises.length ? e.exercises.map(x => {
+    const gain = x.pct === null ? '' : ` · ${x.pct > 0 ? '+' : ''}${fmtNum(x.pct)}%`;
+    const line = x.baseline === null
+      ? `best e1RM ${fmtNum(x.best)} lb`
+      : `e1RM ${fmtNum(x.baseline)} → ${fmtNum(x.best)} lb${gain}`;
+    const note = LB_STATUS[x.status] ? ` · ${LB_STATUS[x.status]}` : '';
+    return `
+    <div class="lb-line">
+      <span class="main">${esc(x.name)}<span class="sub">${esc(line + note)}</span></span>
+      <span class="val${x.points ? '' : ' zero'}">${x.points}</span>
+    </div>`;
+  }).join('') : `<div class="lb-line"><span class="main text-d">no lifts in the 1–${data.rules.maxReps} rep range this ${data.period}</span></div>`;
+  return `<div class="lb-detail">${consistency}${lifts}</div>`;
+}
+
+function renderStrength(data) {
+  el('lb-head').innerHTML = `<div class="lb-rules">all-time heaviest weight lifted for at least 1 rep · ties: more reps, then first to do it · tap an exercise for everyone's best</div>`;
+  const filter = el('lb-filter');
+  filter.style.display = data.exercises.length ? '' : 'none';
+  if (!data.exercises.length) {
+    el('lb-list').innerHTML = `<div class="empty">no finished workouts yet — lift something!</div>`;
+    return;
+  }
+  const q = filter.value.trim().toLowerCase();
+  const list = q ? data.exercises.filter(x => x.name.toLowerCase().includes(q)) : data.exercises;
+  if (!list.length) { el('lb-list').innerHTML = `<div class="empty">no exercise matches “${esc(filter.value.trim())}”</div>`; return; }
+  el('lb-list').innerHTML = list.map(x => {
+    const key = x.name.toLowerCase();
+    const open = lbOpen.strength === key;
+    const h = x.holder;
+    return `
+      <button class="lb-row${open ? ' open' : ''}" data-key="${esc(key)}">
+        <span class="lb-name" style="white-space:normal;">
+          <span class="lb-ex-name">${esc(x.name)}</span>
+          <span class="sub">👑 @${esc(h.username)}${h.isYou ? ' (you)' : ''} · ${fmtNum(h.weight)} lb × ${h.reps} · ${esc(fmtShortDate(h.date))}</span>
+        </span>
+        <span class="lb-chev">${open ? '▾' : '›'}</span>
+      </button>
+      ${open ? strengthDetail(key) : ''}`;
+  }).join('');
+}
+
+function strengthDetail(key) {
+  const d = lbDetail[key];
+  if (!d) return `<div class="lb-detail"><div class="loading" style="padding:12px 0;">loading…</div></div>`;
+  if (d.error) return `<div class="lb-detail"><div class="empty" style="padding:12px 0;">${esc(d.error)}</div></div>`;
+  return `<div class="lb-detail">${d.entries.map(e => `
+    <div class="lb-line${e.isYou ? ' you' : ''}">
+      <span class="lb-rank${e.rank === 1 ? ' first' : ''}" style="font-size:17px;">${e.rank === 1 ? '👑' : e.rank}</span>
+      <span class="main">@${esc(e.username)}${e.isYou ? ' (you)' : ''}<span class="sub">${esc(fmtShortDate(e.date))}${e.e1rm !== null ? ` · e1RM ~${fmtNum(e.e1rm)} lb` : ''}</span></span>
+      <span class="val">${fmtNum(e.weight)}<small style="font-family:var(--mono); font-size:10px; color:var(--text-d);"> × ${e.reps}</small></span>
+    </div>`).join('')}</div>`;
+}
+
+async function loadStrengthDetail(key) {
+  try {
+    lbDetail[key] = await GET('/leaderboard/strength/' + encodeURIComponent(key));
+  } catch (err) {
+    lbDetail[key] = { error: err.status === 404 ? 'nobody on your board has done this yet' : 'could not load' };
+  }
+  if (lbBoard === 'strength' && lbOpen.strength === key) renderLeaderboard();
+}
+
+function toggleLbRow(key) {
+  lbOpen[lbBoard] = lbOpen[lbBoard] === key ? null : key;
+  renderLeaderboard();
+  if (lbBoard === 'strength' && lbOpen.strength === key && !lbDetail[key]) loadStrengthDetail(key);
+}
+
+// Rows carry the username / exercise key in a data-* attribute (escaped), not
+// in an inline handler.
+el('lb-seg').addEventListener('click', e => {
+  const b = e.target.closest('.seg-btn');
+  if (b) setLbBoard(b.dataset.board);
+});
+el('lb-list').addEventListener('click', e => {
+  const row = e.target.closest('.lb-row');
+  if (row && el('lb-list').contains(row)) toggleLbRow(row.dataset.key);
+});
+
 // ─── Manage exercises (shared library) ───────────────────────────────────────
 // The library is shared by every user. Renaming changes the library only; logged
 // workouts keep the name they were recorded with (the server never rewrites them).
@@ -1378,6 +1630,7 @@ Object.assign(window, {
   logout,
   onFriendSearch, sendRequest, acceptRequest, declineRequest, cancelRequest, removeFriend,
   openFriendHistory, loadMoreFriendHistory, openFhItem, loadMoreFeed, openFeedItem,
+  renderLeaderboard,
 });
 
 // ─── Boot: require a valid token before loading the app ───────────────────────

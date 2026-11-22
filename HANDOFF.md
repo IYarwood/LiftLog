@@ -292,3 +292,34 @@ Then, for each group, keep one spelling and rename or delete the others (with th
 owner's say-so — the library is shared). Logged workouts store the name as text
 (`session_exercises.name`), so deleting a library row never touches history.
 Re-run the migration afterwards.
+
+---
+
+## Leaderboards
+
+Tab **RANKS** (5th bottom tab) → page with a Weekly | Monthly | Strength segmented control.
+No new tables, indexes or migrations: computed on the fly (small data).
+
+Who's on a board: the viewer + **accepted** friends only (same rule as `/api/feed`).
+What counts: **finished** sessions only. All under `requireAuth`.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/api/leaderboard/weekly?offset=0` | Points board, Monday 00:00 reset. `offset=-1` = last week (0 to -520) |
+| GET | `/api/leaderboard/monthly?offset=0` | Points board, 1st 00:00 reset |
+| GET | `/api/leaderboard/strength` | One row per exercise anyone on the board has done, with its holder |
+| GET | `/api/leaderboard/strength/:exercise` | Everyone's best for one exercise (name matched ignoring case); 404 if nobody on the board did it |
+
+Scoring constants live in `backend/src/leaderboard/points.js` (timezone, caps, 25% guard,
+rep range). Timezone defaults to `America/New_York`; set `LEADERBOARD_TZ=<IANA zone>` in
+`backend/.env` (and `pm2 restart`) to change it without a code change.
+
+- **Progress:** per exercise (case-insensitive), best e1RM = weight × (1 + reps/30) from
+  sets with 1–12 reps and weight > 0, this period vs the 8 weeks before the period
+  started. Points = round(% gain × 10), min 0, cap 50/week or 100/month per exercise.
+  No baseline → 0 (sets the baseline). Gain > 25% → 0 (ignored as a likely typo).
+- **Consistency:** 10 pts per distinct local day with a finished workout that logged at
+  least one set with reps ≥ 1; cap 4 days/week, 16 days/month.
+- **Strength:** heaviest weight (reps ≥ 1, weight > 0); tiebreak more reps, then earliest
+  finished session. e1RM is shown only for ≤ 12 reps and never used for ranking.
+  Bodyweight sets (weight 0) don't appear.

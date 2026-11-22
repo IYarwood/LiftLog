@@ -4,15 +4,6 @@ const { parseExerciseName } = require('../validation/exerciseName');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// True if the session exists AND belongs to the given user.
-async function ownsSession(sessionId, userId) {
-  const r = await pool.query(
-    'SELECT 1 FROM sessions WHERE id = $1 AND user_id = $2',
-    [sessionId, userId]
-  );
-  return r.rows.length > 0;
-}
-
 // True if exercise `exId` exists, belongs to session `sessionId`, AND that
 // session belongs to `userId`. Verifies the full ownership chain.
 async function ownsSessionExercise(sessionId, exId, userId) {
@@ -151,23 +142,61 @@ router.patch('/:id/finish', async (req, res) => {
 
 // POST /api/sessions/:id/exercises — add an exercise to this user's session
 // body: { id: string, name: string (trimmed; 1–60 chars), position: number }
+// An exercise appears at most once per session, compared ignoring case:
+//   - 409 { error, id, name } if the session already has that name under a
+//     different id (id/name = the existing entry, so the client can jump to it).
+//   - 200 if this exact { id, name } is already there — a re-sent request
+//     (e.g. a retry after a dropped response) is idempotent, not an error.
+//   - 409 if `id` is already used by a different exercise.
+// The session row is locked (FOR UPDATE) for the check + insert, so two
+// concurrent adds of the same name to one session can't both get in.
 router.post('/:id/exercises', async (req, res) => {
   const { id, position } = req.body;
   if (!id) return res.status(400).json({ error: 'id required' });
   const { name, error } = parseExerciseName(req.body.name);
   if (error) return res.status(400).json({ error });
+  let client;
   try {
-    if (!(await ownsSession(req.params.id, req.userId))) {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const own = await client.query(
+      'SELECT 1 FROM sessions WHERE id = $1 AND user_id = $2 FOR UPDATE',
+      [req.params.id, req.userId]
+    );
+    if (!own.rows.length) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Not found' });
     }
-    await pool.query(
+    const dup = await client.query(
+      `SELECT id, session_id, name FROM session_exercises
+        WHERE id = $1 OR (session_id = $2 AND lower(name) = lower($3))`,
+      [id, req.params.id, name]
+    );
+    if (dup.rows.length) {
+      await client.query('ROLLBACK');
+      const same = dup.rows.find(r => r.id === id);
+      if (same && same.session_id === req.params.id && same.name.toLowerCase() === name.toLowerCase()) {
+        return res.json({ ok: true, id });   // replay of an add that already succeeded
+      }
+      if (same) return res.status(409).json({ error: 'exercise id already in use' });
+      return res.status(409).json({
+        error: 'that exercise is already in this workout',
+        id: dup.rows[0].id,
+        name: dup.rows[0].name,
+      });
+    }
+    await client.query(
       'INSERT INTO session_exercises (id, session_id, name, position) VALUES ($1, $2, $3, $4)',
       [id, req.params.id, name, position ?? 0]
     );
+    await client.query('COMMIT');
     res.json({ ok: true, id });
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Failed to add exercise' });
+  } finally {
+    if (client) client.release();
   }
 });
 

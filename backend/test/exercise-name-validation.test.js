@@ -28,13 +28,21 @@ test('parseExerciseName trims and enforces 1–60 chars', () => {
 });
 
 // ─── POST /api/sessions/:id/exercises ─────────────────────────────────────────
-// Owned session: the ownership SELECT returns a row; capture the INSERT.
+// Owned session: the route runs in a transaction on a pooled client. The
+// ownership SELECT returns a row, the duplicate check returns none; capture the
+// INSERT. `q` counts DB access (connect or query).
 function mockOwnedSession() {
   const calls = [];
-  const q = mock.method(pool, 'query', async (sql, params) => {
-    calls.push({ sql, params });
-    return { rows: [{ '?column?': 1 }], rowCount: 1 };
-  });
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (/FROM sessions/.test(sql)) return { rows: [{ '?column?': 1 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    release() {},
+  };
+  const q = mock.method(pool, 'connect', async () => client);
+  mock.method(pool, 'query', async (sql, params) => { calls.push({ sql, params }); return { rows: [] }; });
   return { q, insert: () => calls.find(c => /INSERT INTO session_exercises/.test(c.sql)) };
 }
 

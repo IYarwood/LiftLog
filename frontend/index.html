@@ -188,6 +188,9 @@
   .ex-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
   .ex-del { flex-shrink: 0; background: none; border: none; color: var(--text-f); font-size: 20px; line-height: 1; padding: 2px 6px; min-width: 36px; min-height: 36px; }
   .ex-del:active { color: var(--danger); }
+  /* "already in this workout" — briefly highlight the existing card */
+  @keyframes cardflash { 0%,100% { border-color: var(--border); box-shadow: none; } 25%,60% { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); } }
+  .ex-flash { animation: cardflash 1.6s ease; }
 
   .ex-manage-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); min-height: 52px; }
   .ex-manage-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-d); }
@@ -418,6 +421,14 @@ function exerciseStats(exName) {
   };
 }
 function el(id) { return document.getElementById(id); }
+// Exercise names match ignoring case everywhere ("Squat" == "squat"): the
+// library, the add sheet, and one-exercise-per-workout. The server compares
+// with lower(), and stores names trimmed.
+const sameName = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+// The active workout's entry for `name` (any casing), or undefined.
+function workoutExercise(name) {
+  return (active?.exercises || []).find(e => sameName(e.name, name));
+}
 // Escape anything user-controlled before it goes into innerHTML. Friends'
 // exercise names / usernames are other people's input, so this matters.
 function esc(v) {
@@ -506,17 +517,50 @@ const EXERCISE_NAME_MSG = 'Exercise names must be 1–60 characters.';
 async function addExerciseToSession(name) {
   if (!active) return;
   name = String(name || '').trim();   // match what the server stores
+  // Already in this workout (any casing)? Jump to it instead of adding a second card.
+  const existing = workoutExercise(name);
+  if (existing) { closeOverlay(); focusExerciseCard(existing.id); return; }
   const id = uid();
   const position = active.exercises.length;
   try {
     await POST(`/sessions/${active.id}/exercises`, { id, name, position });
   } catch (err) {
+    if (err.status === 409 && err.body && err.body.id) {
+      // The server already has it in this workout (added from another tab or
+      // device, or a double tap) — resync and jump to it.
+      await reloadActive();
+      closeOverlay();
+      focusExerciseCard(err.body.id);
+      return;
+    }
     alert(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not add exercise — try again.');
     return;
   }
   active.exercises.push({ id, name, sets: [] });
   closeOverlay();
   renderWorkout();
+}
+
+async function reloadActive() {
+  try {
+    const fresh = await GET('/sessions/active');
+    if (fresh && active && fresh.id === active.id) active = fresh;
+  } catch (err) { console.error(err); }
+  renderWorkout();
+}
+
+// Scroll an exercise card into view and flash it.
+function focusExerciseCard(exId) {
+  if (currentView !== 'workout') showView('workout');
+  // Let the sheet close (and the iOS keyboard drop) before measuring.
+  setTimeout(() => {
+    const card = el('excard-' + exId);
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.remove('ex-flash');
+    void card.offsetWidth;            // restart the animation on repeat taps
+    card.classList.add('ex-flash');
+  }, 120);
 }
 
 async function removeExercise(exId) {
@@ -660,7 +704,7 @@ function renderWorkout(flashSetId) {
     }).join('');
 
     return `
-      <div class="ex-card">
+      <div class="ex-card" id="excard-${esc(ex.id)}">
         <div class="ex-header">
           <div class="flex-fill">
             <div class="disp-md">${esc(ex.name)}</div>
@@ -980,7 +1024,6 @@ function manageMsg(text, isErr) {
   el('manage-msg').classList.toggle('err', !!isErr);
 }
 function sortExercises() { exercises.sort((a, b) => a.localeCompare(b)); }
-const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
 // One library write at a time, so a double-tap can't send the same request twice.
 let manageBusy = false;
 async function manageWrite(fn) {
@@ -1121,6 +1164,7 @@ function openOverlay() {
   setTimeout(() => el('ex-filter').focus(), 100);
 }
 function closeOverlay() {
+  el('ex-filter').blur();   // drop the iOS keyboard
   el('overlay').classList.remove('open');
   if (window.visualViewport) {
     visualViewport.removeEventListener('resize', fitOverlayToViewport);
@@ -1156,6 +1200,7 @@ function renderOverlay() {
 async function createAndAdd(name) {
   name = String(name || '').trim();
   if (!name) return;
+  if (workoutExercise(name)) { addExerciseToSession(name); return; }   // jumps to it
   const local = exercises.find(e => sameName(e, name));
   if (local) { addExerciseToSession(local); return; }
   try {

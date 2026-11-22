@@ -1162,6 +1162,18 @@ function openOverlay() {
     fitOverlayToViewport();
   }
   setTimeout(() => el('ex-filter').focus(), 100);
+  refreshOverlayLibrary();
+}
+// The library is shared: show the cached list at once, then pick up other
+// people's adds/renames in the background. Only re-render if it changed, so
+// the list doesn't flicker under a finger.
+async function refreshOverlayLibrary() {
+  let fresh;
+  try { fresh = await GET('/exercises'); } catch (err) { console.error(err); return; }
+  if (!Array.isArray(fresh)) return;
+  const changed = JSON.stringify(fresh) !== JSON.stringify(exercises);
+  exercises = fresh;
+  if (changed && el('overlay').classList.contains('open')) renderOverlay();
 }
 function closeOverlay() {
   el('ex-filter').blur();   // drop the iOS keyboard

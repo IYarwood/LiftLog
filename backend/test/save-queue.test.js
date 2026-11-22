@@ -215,3 +215,61 @@ test('different sets are sent in parallel', async () => {
   await q.flushAll();
   assert.ok(Date.now() - t0 < 95, 'took ' + (Date.now() - t0) + 'ms');
 });
+
+// ─── Stale failures never overwrite newer edits (review round 3) ──────────────
+test('A (reps=5) fails slowly while B (reps=55) succeeds: 5 is not requeued', async () => {
+  const { createSaveQueue } = await load();
+  mock.method(console, 'error', () => {});
+  const server = [];
+  const q = createSaveQueue(async (t, f) => {
+    if (f.reps === '5') { await sleep(40); throw new Error('timeout'); }
+    server.push(f.reps);
+  }, 5);
+  q.schedule('s1', { setId: 's1' }, { reps: '5' });
+  await sleep(15);                                   // A in flight
+  q.schedule('s1', { setId: 's1' }, { reps: '55' });
+  await sleep(15);                                   // B fired, queued behind A
+  assert.strictEqual(await q.flushAll(), true);      // nothing left to retry
+  assert.strictEqual(q.pendingFields('s1'), null);
+  await q.flushAll();
+  assert.deepStrictEqual(server, ['55']);            // 5 never sent over 55
+});
+
+test('a failed send keeps only the fields nobody edited since', async () => {
+  const { createSaveQueue } = await load();
+  mock.method(console, 'error', () => {});
+  const server = [];
+  let failNext = true;
+  const q = createSaveQueue(async (t, f) => {
+    await sleep(30);
+    if (failNext) { failNext = false; throw new Error('offline'); }
+    server.push(f);
+  }, 5);
+  q.schedule('s1', { setId: 's1' }, { reps: '5', weight: '100' });
+  await sleep(10);                                   // in flight, will fail
+  q.schedule('s1', { setId: 's1' }, { reps: '6' });  // newer reps, weight untouched
+  await sleep(10);                                   // reps=6 fired, chained
+  assert.strictEqual(await q.flushAll(), false);     // weight=100 still unsaved
+  assert.deepStrictEqual(q.pendingFields('s1'), { weight: '100' });
+  assert.strictEqual(await q.flushAll(), true);
+  assert.deepStrictEqual(server, [{ reps: '6' }, { weight: '100' }]);
+});
+
+test('a failure while a newer edit is still queued: the newer value wins, in the same flush', async () => {
+  const { createSaveQueue } = await load();
+  mock.method(console, 'error', () => {});
+  const server = [];
+  let failNext = true;
+  const q = createSaveQueue(async (t, f) => {
+    await sleep(20);
+    if (failNext) { failNext = false; throw new Error('offline'); }
+    server.push(f);
+  }, 600);
+  q.schedule('s1', { setId: 's1' }, { reps: '5' });
+  const flushing = q.flushAll();
+  await sleep(5);
+  q.schedule('s1', { setId: 's1' }, { reps: '55' });   // typed during the flush (600ms timer)
+  assert.strictEqual(await flushing, true);              // 5 superseded; 55 sent by this flush
+  assert.strictEqual(q.size, 0);
+  assert.deepStrictEqual(server, [{ reps: '55' }]);
+});

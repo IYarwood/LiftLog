@@ -15,15 +15,32 @@ router.get('/', async (req, res) => {
 
 // POST /api/exercises — add a new exercise
 // body: { name: string }  (trimmed; 1–60 chars, see validation/exerciseName.js)
+// 200 { ok, name } when created.
+// 409 { error, name } when the library already has that name ignoring case
+// (exact or case variant); `name` is the existing library spelling, or null if
+// that row vanished meanwhile. Uniqueness is guaranteed by the unique index on
+// lower(name) (migrations/2026-11-22-exercise-name-ci-unique.sql); the NOT
+// EXISTS is just a same-statement pre-check, and ON CONFLICT with no target
+// turns a lost race on either unique index into "no row inserted".
 router.post('/', async (req, res) => {
   const { name, error } = parseExerciseName(req.body && req.body.name);
   if (error) return res.status(400).json({ error });
   try {
-    await pool.query(
-      'INSERT INTO exercises (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
+    const ins = await pool.query(
+      `INSERT INTO exercises (name)
+       SELECT $1::text WHERE NOT EXISTS (SELECT 1 FROM exercises WHERE lower(name) = lower($1::text))
+       ON CONFLICT DO NOTHING
+       RETURNING name`,
       [name]
     );
-    res.json({ ok: true });
+    if (ins.rows.length) return res.json({ ok: true, name: ins.rows[0].name });
+    const existing = await pool.query(
+      'SELECT name FROM exercises WHERE lower(name) = lower($1) LIMIT 1', [name]
+    );
+    res.status(409).json({
+      error: 'an exercise with that name already exists',
+      name: existing.rows.length ? existing.rows[0].name : null,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to add exercise' });
@@ -35,8 +52,9 @@ router.post('/', async (req, res) => {
 // Changes the shared library row only. Logged workouts (session_exercises)
 // keep the name they were recorded with — history is never rewritten.
 // 404 if :name doesn't exist; 409 if another exercise already has the new name
-// ignoring case (the add UI treats names case-insensitively too). Changing only
-// the case of the same exercise is allowed.
+// ignoring case. Changing only the case of the same exercise is allowed.
+// The SELECT below is only for a friendly early answer; the real guarantee is
+// the unique index on lower(name), whose violation (23505) also maps to 409.
 router.patch('/:name', async (req, res) => {
   const { name, error } = parseExerciseName(req.body && req.body.name);
   if (error) return res.status(400).json({ error });

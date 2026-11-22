@@ -54,7 +54,7 @@ test('DELETE /api/exercises/:name with a token deletes by name', async () => {
 // ─── Validation on create ─────────────────────────────────────────────────────
 test('POST /api/exercises trims the name before inserting', async () => {
   let captured;
-  mock.method(pool, 'query', async (sql, params) => { captured = { sql, params }; return { rows: [] }; });
+  mock.method(pool, 'query', async (sql, params) => { captured = { sql, params }; return { rows: [{ name: params[0] }] }; });
   const res = await auth(request(app).post('/api/exercises')).send({ name: '  Front Squat \n' });
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(captured.params, ['Front Squat']);
@@ -79,7 +79,7 @@ for (const [label, body] of [
 
 test('POST /api/exercises accepts exactly 60 chars (padding trimmed first)', async () => {
   let captured;
-  mock.method(pool, 'query', async (sql, params) => { captured = params; return { rows: [] }; });
+  mock.method(pool, 'query', async (sql, params) => { captured = params; return { rows: [{ name: params[0] }] }; });  // INSERT ... RETURNING name
   const name = 'b'.repeat(60);
   const res = await auth(request(app).post('/api/exercises')).send({ name: `   ${name}   ` });
   assert.strictEqual(res.status, 200);
@@ -88,7 +88,7 @@ test('POST /api/exercises accepts exactly 60 chars (padding trimmed first)', asy
 
 test('POST /api/exercises stores HTML-ish names verbatim (escaping is the renderer\'s job)', async () => {
   let captured;
-  mock.method(pool, 'query', async (sql, params) => { captured = params; return { rows: [] }; });
+  mock.method(pool, 'query', async (sql, params) => { captured = params; return { rows: [{ name: params[0] }] }; });  // INSERT ... RETURNING name
   const name = `<img src=x onerror=alert(1)>`;
   const res = await auth(request(app).post('/api/exercises')).send({ name });
   assert.strictEqual(res.status, 200);

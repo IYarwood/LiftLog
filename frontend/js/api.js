@@ -25,6 +25,7 @@ export async function api(method, path, body) {
   if (!res.ok) {
     const err = new Error(`API ${method} ${path} failed: ${res.status}`);
     err.status = res.status;
+    err.body = await res.json().catch(() => null);   // e.g. 409 { error, name }
     throw err;
   }
   return res.json();

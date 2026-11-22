@@ -83,3 +83,25 @@ test('buildBoard: totals, ordering, ties, viewer flag, no user ids leaked', () =
   assert.deepStrictEqual(zed.exercises.map(x => [x.name, x.points, x.status]), [['Squat', 25, 'scored'], ['Bench', 0, 'new']]);
   assert.deepStrictEqual(zed.consistency, { days: 1, countedDays: 1, points: 10 });
 });
+
+test('crown guard: top lift needs a second lift within 50%', () => {
+  assert.strictEqual(P.CROWN_MAX_JUMP_PCT, 50);
+  assert.strictEqual(P.isVerifiedLift(1, 225, null), false);    // only lift
+  assert.strictEqual(P.isVerifiedLift(1, 2250, 225), false);    // typo
+  assert.strictEqual(P.isVerifiedLift(1, 150, 100), true);      // exactly +50%
+  assert.strictEqual(P.isVerifiedLift(1, 150.5, 100), false);   // just over
+  assert.strictEqual(P.isVerifiedLift(2, 225, null), true);     // backed by a heavier lift
+});
+
+test('strengthStandings: guard, fallback to next lift, ranking and ties', () => {
+  const L = (userId, rn, weight, nextWeight, reps, date) =>
+    ({ userId, username: 'u' + userId, rn, weight, nextWeight, reps, date });
+  const { ranked, unverified } = P.strengthStandings([
+    L(1, 1, 2250, 225, 5, '2026-01-02'), L(1, 2, 225, 220, 5, '2026-01-01'),   // typo → 225 counts
+    L(2, 1, 230, 220, 3, '2026-01-03'), L(2, 2, 220, 200, 3, '2026-01-03'),
+    L(3, 1, 225, 200, 5, '2026-01-01'), L(3, 2, 200, 180, 5, '2026-01-01'),    // ties user 1 exactly
+    L(4, 1, 500, null, 1, '2026-01-01'),                                       // single lift: unverified only
+  ]);
+  assert.deepStrictEqual(ranked.map(r => [r.rank, r.userId, r.weight]), [[1, 2, 230], [2, 1, 225], [2, 3, 225]]);
+  assert.deepStrictEqual(unverified.map(r => [r.userId, r.weight]), [[1, 2250], [4, 500]]);
+});

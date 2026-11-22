@@ -28,6 +28,12 @@ const DAYS_CAP = { week: 4, month: 16 };
 
 const PERIODS = ['week', 'month'];
 
+// Strength crown guard: a user's top lift for an exercise can't take or hold
+// the crown while it is more than this many percent heavier than their
+// next-best lift of that exercise (a typo like 2250 for 225). It counts as soon
+// as they log a second lift within this margin of it.
+const CROWN_MAX_JUMP_PCT = 50;
+
 // Epley estimated 1RM.
 function e1rm(weight, reps) {
   return weight * (1 + reps / 30);
@@ -62,6 +68,44 @@ function assignRanks(rows, sameAs) {
     row.rank = i > 0 && sameAs(rows[i - 1], row) ? rows[i - 1].rank : i + 1;
   });
   return rows;
+}
+
+// Is a user's rn-th best lift (1 = their top) verified? `weight` is its weight,
+// `nextWeight` that of the lift just below it (null if none). Anything below the
+// top is backed by a heavier lift, so only the top can be unverified.
+function isVerifiedLift(rn, weight, nextWeight) {
+  if (rn > 1) return true;
+  if (nextWeight === null || nextWeight === undefined) return false;
+  return weight <= nextWeight * (1 + CROWN_MAX_JUMP_PCT / 100) + 1e-9;
+}
+
+// Strength order: heavier → more reps at that weight → done first → name.
+function compareLifts(a, b) {
+  return b.weight - a.weight || b.reps - a.reps ||
+    new Date(a.date) - new Date(b.date) || a.username.localeCompare(b.username);
+}
+
+// rows: each user's top 2 lifts for ONE exercise, as
+//   { userId, username, rn, weight, nextWeight, reps, date, ... }.
+// Returns { ranked, unverified }: ranked = each user's best VERIFIED lift in
+// crown order (with ranks); unverified = top lifts that fail the guard.
+function strengthStandings(rows) {
+  const byUser = new Map();
+  for (const r of rows) {
+    if (!byUser.has(r.userId)) byUser.set(r.userId, []);
+    byUser.get(r.userId).push(r);
+  }
+  const ranked = [], unverified = [];
+  for (const lifts of byUser.values()) {
+    lifts.sort((a, b) => a.rn - b.rn);
+    const best = lifts.find(l => isVerifiedLift(l.rn, l.weight, l.nextWeight));
+    if (best) ranked.push(best);
+    if (lifts[0] !== best) unverified.push(lifts[0]);
+  }
+  ranked.sort(compareLifts);
+  unverified.sort(compareLifts);
+  const same = (a, b) => a.weight === b.weight && a.reps === b.reps && +new Date(a.date) === +new Date(b.date);
+  return { ranked: assignRanks(ranked, same), unverified };
 }
 
 const round1 = (n) => (n === null || n === undefined ? null : Math.round(n * 10) / 10);
@@ -107,6 +151,7 @@ function buildBoard({ users, lifts, days, period, viewerId }) {
 
 module.exports = {
   TIMEZONE, E1RM_MIN_REPS, E1RM_MAX_REPS, BASELINE_WEEKS, POINTS_PER_PERCENT,
-  PROGRESS_CAP, MAX_PLAUSIBLE_GAIN_PCT, POINTS_PER_DAY, DAYS_CAP, PERIODS,
+  PROGRESS_CAP, MAX_PLAUSIBLE_GAIN_PCT, POINTS_PER_DAY, DAYS_CAP, PERIODS, CROWN_MAX_JUMP_PCT,
   e1rm, progressPoints, consistencyPoints, assignRanks, buildBoard, round1,
+  isVerifiedLift, strengthStandings,
 };

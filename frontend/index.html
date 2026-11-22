@@ -313,6 +313,8 @@
   .lb-line { display: flex; align-items: flex-start; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
   .lb-line:last-child { border-bottom: none; }
   .lb-line.you { color: var(--accent-t); }
+  .lb-line.unverified { opacity: 0.45; }
+  .lb-unv { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-d); border: 1px solid var(--border-h); border-radius: 4px; padding: 0 5px; margin-left: 6px; white-space: nowrap; }
   .lb-line .main { flex: 1; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
   .lb-line .sub { display: block; font-size: 10px; color: var(--text-d); margin-top: 2px; }
   .lb-line .val { flex-shrink: 0; font-family: var(--disp); font-size: 17px; letter-spacing: 1px; text-align: right; }
@@ -1506,7 +1508,7 @@ function pointsBreakdown(e, data) {
 }
 
 function renderStrength(data) {
-  el('lb-head').innerHTML = `<div class="lb-rules">all-time heaviest weight lifted for at least 1 rep · ties: more reps, then first to do it · tap an exercise for everyone's best</div>`;
+  el('lb-head').innerHTML = `<div class="lb-rules">all-time heaviest weight lifted for at least 1 rep · ties: more reps, then first to do it · a lift more than ${data.crownMaxJumpPct ?? 50}% above your next-best is "unverified" until you back it up · tap an exercise for everyone's best</div>`;
   const filter = el('lb-filter');
   filter.style.display = data.exercises.length ? '' : 'none';
   if (!data.exercises.length) {
@@ -1519,12 +1521,14 @@ function renderStrength(data) {
   el('lb-list').innerHTML = list.map(x => {
     const key = x.name.toLowerCase();
     const open = lbOpen.strength === key;
-    const h = x.holder;
+    const h = x.holder;   // null while every top lift is unverified
     return `
       <button class="lb-row${open ? ' open' : ''}" data-key="${esc(key)}">
         <span class="lb-name" style="white-space:normal;">
           <span class="lb-ex-name">${esc(x.name)}</span>
-          <span class="sub">👑 @${esc(h.username)}${h.isYou ? ' (you)' : ''} · ${fmtNum(h.weight)} lb × ${h.reps} · ${esc(fmtShortDate(h.date))}${h.edited ? editedTag() : ''}</span>
+          <span class="sub">${h
+            ? `👑 @${esc(h.username)}${h.isYou ? ' (you)' : ''} · ${fmtNum(h.weight)} lb × ${h.reps} · ${esc(fmtShortDate(h.date))}${h.edited ? editedTag() : ''}`
+            : `no verified lift yet`}</span>
         </span>
         <span class="lb-chev">${open ? '▾' : '›'}</span>
       </button>
@@ -1540,6 +1544,11 @@ function strengthDetail(key) {
     <div class="lb-line${e.isYou ? ' you' : ''}">
       <span class="lb-rank${e.rank === 1 ? ' first' : ''}" style="font-size:17px;">${e.rank === 1 ? '👑' : e.rank}</span>
       <span class="main">@${esc(e.username)}${e.isYou ? ' (you)' : ''}<span class="sub">${esc(fmtShortDate(e.date))}${e.e1rm !== null ? ` · e1RM ~${fmtNum(e.e1rm)} lb` : ''}${e.edited ? editedTag() : ''}</span></span>
+      <span class="val">${fmtNum(e.weight)}<small style="font-family:var(--mono); font-size:10px; color:var(--text-d);"> × ${e.reps}</small></span>
+    </div>`).join('')}${(d.unverified || []).map(e => `
+    <div class="lb-line unverified">
+      <span class="lb-rank" style="font-size:17px;">–</span>
+      <span class="main">@${esc(e.username)}${e.isYou ? ' (you)' : ''}<span class="lb-unv">unverified</span><span class="sub">${esc(fmtShortDate(e.date))} · more than ${d.crownMaxJumpPct ?? 50}% above their next-best — counts once backed up${e.edited ? editedTag() : ''}</span></span>
       <span class="val">${fmtNum(e.weight)}<small style="font-family:var(--mono); font-size:10px; color:var(--text-d);"> × ${e.reps}</small></span>
     </div>`).join('')}</div>`;
 }

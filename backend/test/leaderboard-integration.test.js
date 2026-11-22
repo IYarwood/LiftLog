@@ -180,16 +180,16 @@ describe('leaderboard (integration, real test DB)', { skip }, () => {
       // s is a stranger
 
       // Bench: G 200×5 first, F 200×5 later, V 200×3 → G, F, V
-      await makeSession('v', t(3), [['Bench Press', 3, 200]]);
-      await makeSession('g', t(5), [['bench press', 5, 200]]);
+      await makeSession('v', t(3), [['Bench Press', 3, 180], ['Bench Press', 3, 200]]);
+      await makeSession('g', t(5), [['bench press', 5, 180], ['bench press', 5, 200]]);
       await makeSession('f', t(2), [['Bench Press', 5, 200], ['Bench Press', 10, 180]]);
       await makeSession('f', null, [['Bench Press', 1, 500]]);       // in progress: excluded
       await makeSession('p', t(2), [['Bench Press', 1, 400], ['Pending Only Lift', 5, 50]]);
       await makeSession('s', t(2), [['Bench Press', 1, 450], ['Stranger Only Lift', 5, 50]]);
-      await makeSession('u', t(2), [['Bench Press', 1, 150]]);
+      await makeSession('u', t(2), [['Bench Press', 1, 140], ['Bench Press', 1, 150]]);
       await makeSession('g', null, [['Active Only Lift', 5, 50]]);   // in progress
       // High-rep set: holder, but no e1RM shown
-      await makeSession('g', t(4), [['Leg Press', 15, 300]]);
+      await makeSession('g', t(4), [['Leg Press', 15, 280], ['Leg Press', 15, 300]]);
     });
 
     test('require a token', async () => {
@@ -271,6 +271,37 @@ describe('leaderboard (integration, real test DB)', { skip }, () => {
       assert.ok(!s.body.entries.some(e => e.username === U.u.username));
       // and v disappears from u's board too
       assert.deepStrictEqual(names((await get('u', '/api/leaderboard/weekly')).body), [U.u.username]);
+    });
+
+    test('crown guard: a lone or >50% jump lift is "unverified" until backed up', async () => {
+      // Overhead Press: f does 100×5 and 105×5; g typos 1000×5 next to a real 110×5.
+      await makeSession('f', t(2), [['Overhead Press', 5, 100], ['Overhead Press', 5, 105]]);
+      await makeSession('g', t(2), [['Overhead Press', 5, 110], ['Overhead Press', 5, 1000]]);
+      let r = (await get('v', '/api/leaderboard/strength/overhead%20press')).body;
+      // g's typo is held back; g still ranks with their verified 110
+      assert.deepStrictEqual(r.entries.map(e => [e.rank, e.username, e.weight]),
+        [[1, U.g.username, 110], [2, U.f.username, 105]]);
+      assert.deepStrictEqual(r.unverified.map(e => [e.username, e.weight, e.unverified]), [[U.g.username, 1000, true]]);
+      assert.strictEqual(r.crownMaxJumpPct, 50);
+
+      // Front Squat: v's only lift is a single set → no holder yet
+      await makeSession('v', t(2), [['Front Squat', 3, 150]]);
+      const list = (await get('v', '/api/leaderboard/strength')).body;
+      const fs = list.exercises.find(x => x.name === 'Front Squat');
+      assert.strictEqual(fs.holder, null);
+      assert.strictEqual(fs.unverified, 1);
+
+      // exactly +50% counts: 150 is backed by a 100
+      await makeSession('v', t(1), [['Front Squat', 3, 100]]);
+      r = (await get('v', '/api/leaderboard/strength/front%20squat')).body;
+      assert.deepStrictEqual(r.entries.map(e => [e.username, e.weight]), [[U.v.username, 150]]);
+      assert.deepStrictEqual(r.unverified, []);
+
+      // a genuine big lift counts once backed up: g logs 700×5 later → 1000 is within 50%
+      await makeSession('g', t(0.5), [['Overhead Press', 5, 700]]);
+      r = (await get('v', '/api/leaderboard/strength/overhead%20press')).body;
+      assert.deepStrictEqual(r.entries[0].weight, 1000);
+      assert.deepStrictEqual(r.unverified, []);
     });
   });
 });

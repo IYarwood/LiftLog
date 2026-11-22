@@ -934,7 +934,7 @@ function renderHistory() {
     <div class="card clickable" onclick="openDetail(${jsArg(s.id)})">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
         <div class="flex-fill">
-          <div class="disp-sm">${fmtDate(s.startedAt)}</div>
+          <div class="disp-sm">${fmtDate(s.startedAt)}${s.editedAt ? editedTag(s.editedAt) : ''}</div>
           <div class="text-d">${fmtTime(s.startedAt)}${s.finishedAt ? ' → ' + fmtTime(s.finishedAt) : ''}</div>
           <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${esc(e.name)}</span>`).join('')}</div>
         </div>

@@ -222,6 +222,19 @@ describe('session exercises (integration, real test DB)', { skip }, () => {
     assert.deepStrictEqual([(await set()).reps, (await set()).weight], [null, null]);
   });
 
+  test('savedAt: every format the validator accepts is accepted by Postgres; loose strings are a 400', async () => {
+    const sid = await newSession();
+    await addEx(sid, ID('t1'), 'Plank');
+    const base = `/api/sessions/${sid}/exercises/${ID('t1')}/sets`;
+    await authed(request(app).post(base)).send({ id: ID('ts') });
+    const patch = (savedAt) => authed(request(app).patch(`${base}/${ID('ts')}`)).send({ savedAt });
+    for (const s of ['2026-11-22T01:00:00.000Z', '2026-11-22T01:00Z', '2026-11-22T01:00:00.123456Z',
+                     '2026-11-22T01:00:00+02:00', '2024-02-29T00:00:00Z']) {
+      assert.strictEqual((await patch(s)).status, 200, s);
+    }
+    for (const s of ['2020', '2026-02-31T00:00:00Z']) assert.strictEqual((await patch(s)).status, 400, s);
+  });
+
   test("another user's session → 404", async () => {
     const other = await pool.query(
       "INSERT INTO users (username, password_hash) VALUES ($1, 'x') RETURNING id", [`zzsx_other_${tag}`]

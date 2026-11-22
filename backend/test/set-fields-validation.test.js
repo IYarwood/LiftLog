@@ -89,3 +89,43 @@ test('PATCH set: an omitted field is marked "not sent", an explicit null is sent
   const upd = calls.find(c => /UPDATE sets/.test(c.sql));
   assert.deepStrictEqual(upd.params, [false, null, true, null, null, 'x1', 'e1']);
 });
+
+// ─── savedAt: strict ISO-8601 (review round 4) ────────────────────────────────
+const { isIsoDateTime } = require('../src/validation/setFields');
+const GOOD_DATES = [
+  '2026-11-22T01:00:00.000Z',   // what the browser sends (toISOString)
+  '2026-11-22T01:00:00Z',
+  '2026-11-22T01:00Z',
+  '2026-11-22T01:00:00.123456Z',
+  '2026-11-22T01:00:00+02:00',
+  '2024-02-29T00:00:00Z',       // leap day
+];
+const BAD_DATES = [
+  '2020', '2026-11-22', '2026-11-22 01:00:00Z', '2026-11-22T01:00:00',   // no zone
+  '2026-02-31T00:00:00Z', '2025-02-29T00:00:00Z', '2026-13-01T00:00:00Z',
+  '2026-11-22T24:00:00Z', '2026-11-22T01:60:00Z', '2026-11-22T01:00:60Z',
+  '0000-01-01T00:00:00Z', '2026-11-22T01:00:00+15:00', 'yesterday', '',
+  '2026-11-22T01:00:00.1234567Z',
+];
+
+test('isIsoDateTime accepts full ISO date-times with a zone', () => {
+  for (const s of GOOD_DATES) assert.ok(isIsoDateTime(s), s);
+});
+
+test('isIsoDateTime rejects partial, zoneless and impossible dates', () => {
+  for (const s of BAD_DATES) assert.ok(!isIsoDateTime(s), s);
+  for (const v of [null, undefined, 123, {}]) assert.ok(!isIsoDateTime(v));
+});
+
+for (const s of ['2020', '2026-02-31T00:00:00Z', '2026-11-22']) {
+  test(`PATCH set rejects savedAt ${JSON.stringify(s)} with 400 and no DB access`, async () => {
+    const q = mock.method(pool, 'query', async () => ({ rows: [{}], rowCount: 1 }));
+    const res = await request(app)
+      .patch('/api/sessions/s1/exercises/e1/sets/x1')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ savedAt: s });
+    assert.strictEqual(res.status, 400);
+    assert.match(res.body.error, /ISO-8601/);
+    assert.strictEqual(q.mock.callCount(), 0);
+  });
+}

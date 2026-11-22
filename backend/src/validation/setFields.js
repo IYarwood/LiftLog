@@ -26,6 +26,22 @@ function readNumber(body, key) {
   return { bad: true };
 }
 
+// Strict ISO-8601 date-time with an explicit zone, e.g. what the browser's
+// Date#toISOString() sends: 2026-11-22T01:00:00.000Z or …+02:00. Seconds and
+// fraction are optional. Date.parse alone is too lenient: it takes "2020" and
+// rolls "2026-02-31" into March, and Postgres rejects some of what it takes
+// (a 500), so the calendar date is checked explicitly.
+const ISO_DATETIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+function isIsoDateTime(s) {
+  const m = typeof s === 'string' && ISO_DATETIME.exec(s);
+  if (!m) return false;
+  const [, y, mo, d, h, mi, sec = '0', , oh = '0', om = '0'] = m;
+  const day = new Date(Date.UTC(+y, +mo - 1, +d));
+  return +y >= 1 &&
+    day.getUTCFullYear() === +y && day.getUTCMonth() === +mo - 1 && day.getUTCDate() === +d &&
+    +h <= 23 && +mi <= 59 && +sec <= 59 && +oh <= 14 && +om <= 59;
+}
+
 // Returns { fields } holding only the keys to change (null = clear it), or
 // { error } with a message for a 400.
 //   reps / weight: omitted → unchanged; null or '' → cleared; else validated.
@@ -52,12 +68,12 @@ function parseSetFields(body) {
   if (!weight.omit) fields.weight = weight.value;
 
   if (body.savedAt !== undefined && body.savedAt !== null) {
-    if (typeof body.savedAt !== 'string' || Number.isNaN(Date.parse(body.savedAt))) {
-      return { error: 'savedAt must be a date string' };
+    if (!isIsoDateTime(body.savedAt)) {
+      return { error: 'savedAt must be an ISO-8601 date-time, e.g. 2026-11-22T01:00:00.000Z' };
     }
     fields.savedAt = body.savedAt;
   }
   return { fields };
 }
 
-module.exports = { MAX_REPS, MAX_WEIGHT, parseSetFields };
+module.exports = { MAX_REPS, MAX_WEIGHT, parseSetFields, isIsoDateTime };

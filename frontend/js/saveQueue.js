@@ -9,8 +9,15 @@
 //     weight within the delay sends both, not just the last one).
 // flushAll() sends everything now and resolves when it's done, so callers can
 // make sure edits reach the server before they finish or reload the workout.
-export function createSaveQueue(send, delay = 600) {
+//
+// Failures: a 4xx (err.status 400–499) is permanent — the server refused the
+// value, or the set/exercise is gone — so it is reported to onRejected and
+// NOT retried (retrying could never succeed and would block FINISH forever).
+// Anything else (network error, 5xx) is kept and retried by the next flush.
+export function createSaveQueue(send, delay = 600, { onRejected } = {}) {
   const pending = new Map();   // key -> { target, fields, timer }
+  const dropped = new Set();   // keys dropped while a send may be in flight
+  const isPermanent = (err) => !!err && err.status >= 400 && err.status < 500;
 
   // Send one key's pending save now. Resolves true on success (or if nothing
   // was pending), false if the send failed — the edit is then kept so the next
@@ -23,7 +30,12 @@ export function createSaveQueue(send, delay = 600) {
     return Promise.resolve()
       .then(() => send(p.target, p.fields))
       .then(() => true, (err) => {
+        if (isPermanent(err)) {
+          if (onRejected) onRejected(p.target, p.fields, err);
+          return true;   // nothing left to retry
+        }
         console.error('Set update failed:', err);
+        if (dropped.has(key)) return true;   // its set/exercise was removed meanwhile
         const newer = pending.get(key);   // edited again while this was in flight
         pending.set(key, {
           target: p.target,
@@ -36,6 +48,7 @@ export function createSaveQueue(send, delay = 600) {
 
   return {
     schedule(key, target, fields) {
+      dropped.delete(key);
       const p = pending.get(key);
       if (p) clearTimeout(p.timer);
       const entry = { target: p ? p.target : target, fields: { ...(p ? p.fields : {}), ...fields } };
@@ -53,6 +66,16 @@ export function createSaveQueue(send, delay = 600) {
       const p = pending.get(key);
       if (p) clearTimeout(p.timer);
       pending.delete(key);
+      dropped.add(key);
+    },
+    // Drop every pending save for which `shouldDrop(target)` is true — e.g. its set
+    // or exercise no longer exists. Returns how many were dropped.
+    dropWhere(shouldDrop) {
+      let n = 0;
+      for (const [key, p] of [...pending]) {
+        if (shouldDrop(p.target)) { this.drop(key); n++; }
+      }
+      return n;
     },
     // Unsent field values for a key (a copy), or null.
     pendingFields(key) {

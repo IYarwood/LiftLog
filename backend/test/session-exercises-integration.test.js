@@ -188,6 +188,21 @@ describe('session exercises (integration, real test DB)', { skip }, () => {
     assert.deepStrictEqual(sets, [ID('set2'), ID('set3')]);
   });
 
+  test('set values the columns cannot hold are a 400, not a 500, and change nothing', async () => {
+    const sid = await newSession();
+    await addEx(sid, ID('v1'), 'Calf Raise');
+    const base = `/api/sessions/${sid}/exercises/${ID('v1')}/sets`;
+    await authed(request(app).post(base)).send({ id: ID('vs') });
+    const patch = (body) => authed(request(app).patch(`${base}/${ID('vs')}`)).send(body);
+    assert.strictEqual((await patch({ reps: 5, weight: 9999.99 })).status, 200);
+    assert.strictEqual((await patch({ weight: 12345 })).status, 400);
+    assert.strictEqual((await patch({ reps: 1.5 })).status, 400);
+    assert.strictEqual((await patch({ reps: '7', weight: '' })).status, 200);   // blank = unchanged
+    const [set] = (await getSession(sid)).exercises[0].sets;
+    assert.strictEqual(set.reps, 7);
+    assert.strictEqual(set.weight, 9999.99);
+  });
+
   test("another user's session → 404", async () => {
     const other = await pool.query(
       "INSERT INTO users (username, password_hash) VALUES ($1, 'x') RETURNING id", [`zzsx_other_${tag}`]

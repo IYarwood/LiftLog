@@ -2,6 +2,7 @@ const router = require('express').Router();
 const pool = require('../db/pool');
 const { parseExerciseName } = require('../validation/exerciseName');
 const { toWeight } = require('../db/hydrate');
+const { parseSetFields } = require('../validation/setFields');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -256,8 +257,12 @@ router.post('/:id/exercises/:exId/sets', async (req, res) => {
 
 // PATCH /api/sessions/:id/exercises/:exId/sets/:setId — update set fields
 // body: { reps?: number, weight?: number, savedAt?: string }
+// reps: whole number 0–9999; weight: 0–9999.99 (NUMERIC(6,2)); numeric strings
+// are accepted; absent/null/'' leaves a field unchanged. Out-of-range or
+// malformed values are a 400 (see validation/setFields.js).
 router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
-  const { reps, weight, savedAt } = req.body;
+  const { reps, weight, savedAt, error } = parseSetFields(req.body);
+  if (error) return res.status(400).json({ error });
   try {
     if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
       return res.status(404).json({ error: 'Not found' });
@@ -268,7 +273,7 @@ router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
          weight = COALESCE($2, weight),
          saved_at = COALESCE($3, saved_at)
        WHERE id = $4 AND session_exercise_id = $5`,
-      [reps ?? null, weight ?? null, savedAt ?? null, req.params.setId, req.params.exId]
+      [reps, weight, savedAt, req.params.setId, req.params.exId]
     );
     res.json({ ok: true });
   } catch (err) {

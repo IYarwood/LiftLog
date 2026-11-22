@@ -105,3 +105,67 @@ test('drop cancels a pending save', async () => {
   assert.strictEqual(sent.length, 0);
   assert.strictEqual(q.pendingFields('s1'), null);
 });
+
+// ─── Permanent failures must never block FINISH ───────────────────────────────
+const httpErr = (status) => Object.assign(new Error('HTTP ' + status), { status });
+
+test('a 4xx is reported once and NOT retried; flushAll succeeds', async () => {
+  const { createSaveQueue } = await load();
+  const rejected = [];
+  let calls = 0;
+  const q = createSaveQueue(async () => { calls++; throw httpErr(400); }, 600,
+    { onRejected: (t, f, err) => rejected.push([t.setId, f, err.status]) });
+  q.schedule('s1', { setId: 's1' }, { weight: '12345' });
+  assert.strictEqual(await q.flushAll(), true);
+  assert.strictEqual(await q.flushAll(), true);
+  assert.strictEqual(calls, 1);
+  assert.deepStrictEqual(rejected, [['s1', { weight: '12345' }, 400]]);
+  assert.strictEqual(q.size, 0);
+});
+
+// Tester's case: exercise deleted from another tab while an edit is pending.
+// This tab still shows it, so the save is attempted and gets a 404.
+test('exercise deleted in another tab: the 404 is dropped and FINISH can proceed', async () => {
+  const { createSaveQueue } = await load();
+  let calls = 0;
+  const q = createSaveQueue(async () => { calls++; throw httpErr(404); }, 600, { onRejected: () => {} });
+  q.schedule('s1', { sessionId: 'A', exId: 'gone', setId: 's1' }, { reps: '5' });
+  for (let tap = 0; tap < 3; tap++) assert.strictEqual(await q.flushAll(), true);   // every FINISH tap
+  assert.strictEqual(calls, 1);
+});
+
+test('5xx / network errors are still retried', async () => {
+  const { createSaveQueue } = await load();
+  mock.method(console, 'error', () => {});
+  let fail = true;
+  const q = createSaveQueue(async () => { if (fail) throw httpErr(503); }, 600);
+  q.schedule('s1', { setId: 's1' }, { reps: '5' });
+  assert.strictEqual(await q.flushAll(), false);
+  fail = false;
+  assert.strictEqual(await q.flushAll(), true);
+});
+
+test('drop() while a send is in flight: its failure is not requeued (removed exercise)', async () => {
+  const { createSaveQueue } = await load();
+  mock.method(console, 'error', () => {});
+  let rejectSend;
+  const q = createSaveQueue(() => new Promise((_, rej) => { rejectSend = rej; }), 600);
+  q.schedule('s1', { setId: 's1' }, { reps: '5' });
+  const flushing = q.flushAll();
+  await sleep(5);
+  q.drop('s1');                         // user tapped × on the exercise
+  rejectSend(new Error('network'));     // even a retryable failure
+  assert.strictEqual(await flushing, true);
+  assert.strictEqual(q.size, 0);
+});
+
+test('dropWhere removes saves whose target no longer exists', async () => {
+  const { createSaveQueue } = await load();
+  const { sent, send } = recorder();
+  const q = createSaveQueue(send, 600);
+  q.schedule('s1', { exId: 'keep', setId: 's1' }, { reps: '1' });
+  q.schedule('s2', { exId: 'gone', setId: 's2' }, { reps: '2' });
+  assert.strictEqual(q.dropWhere(t => t.exId === 'gone'), 1);
+  await q.flushAll();
+  assert.deepStrictEqual(sent.map(x => x.target.setId), ['s1']);
+});

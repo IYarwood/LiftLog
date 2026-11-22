@@ -124,6 +124,8 @@ async function pointsBoard(viewerId, period, { offset = 0, now = new Date(), tz 
     hasFriends: usersRes.rows.length > 1,
     rules: {
       progressCap: P.PROGRESS_CAP[period],
+      progressTotalCap: P.PROGRESS_TOTAL_CAP[period],
+      crownMaxJumpPct: P.CROWN_MAX_JUMP_PCT,
       daysCap: P.DAYS_CAP[period],
       pointsPerDay: P.POINTS_PER_DAY,
       pointsPerPercent: P.POINTS_PER_PERCENT,

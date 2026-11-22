@@ -105,3 +105,27 @@ test('strengthStandings: guard, fallback to next lift, ranking and ties', () => 
   assert.deepStrictEqual(ranked.map(r => [r.rank, r.userId, r.weight]), [[1, 2, 230], [2, 1, 225], [2, 3, 225]]);
   assert.deepStrictEqual(unverified.map(r => [r.userId, r.weight]), [[1, 2250], [4, 500]]);
 });
+
+test('total progress cap: 150/week, 400/month; consistency is separate', () => {
+  assert.deepStrictEqual(P.PROGRESS_TOTAL_CAP, { week: 150, month: 400 });
+  const users = [{ id: 1, username: 'a' }, { id: 2, username: 'b' }];
+  // user 1: four exercises at +10% → 4 × capped 50 = 200 raw (week) / 4 × 100 = 400 (month)
+  const lifts = ['A', 'B', 'C', 'D'].map(name => ({ userId: 1, name, baseline: 100, best: 110 }))
+    .concat([{ userId: 2, name: 'A', baseline: 100, best: 103 }]);          // 30
+  const days = new Map([[1, 6], [2, 1]]);
+  const wk = P.buildBoard({ users, lifts, days, period: 'week', viewerId: 1 });
+  const a = wk.find(e => e.username === 'a');
+  assert.deepStrictEqual([a.progressRaw, a.progress, a.progressCapped, a.consistency.points, a.total],
+    [200, 150, true, 40, 190]);
+  const b = wk.find(e => e.username === 'b');
+  assert.deepStrictEqual([b.progressRaw, b.progress, b.progressCapped, b.total], [30, 30, false, 40]);
+
+  // month: 400 raw is exactly the cap → not marked capped
+  const mo = P.buildBoard({ users, lifts, days, period: 'month', viewerId: 1 });
+  const am = mo.find(e => e.username === 'a');
+  assert.deepStrictEqual([am.progressRaw, am.progress, am.progressCapped], [400, 400, false]);
+  // five of them → 500 raw → 400
+  const five = lifts.concat([{ userId: 1, name: 'E', baseline: 100, best: 110 }]);
+  const am5 = P.buildBoard({ users, lifts: five, days, period: 'month', viewerId: 1 }).find(e => e.username === 'a');
+  assert.deepStrictEqual([am5.progressRaw, am5.progress, am5.progressCapped, am5.total], [500, 400, true, 460]);
+});

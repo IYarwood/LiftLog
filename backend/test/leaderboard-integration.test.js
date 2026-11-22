@@ -133,6 +133,9 @@ describe('leaderboard (integration, real test DB)', { skip }, () => {
       // days: Monday + Wednesday (twice) = 2. Not Sunday, not the empty Friday one.
       assert.deepStrictEqual(alice.consistency, { days: 2, countedDays: 2, points: 20 });
       assert.strictEqual(alice.total, 25 + 33 + 50 + 20);
+      assert.deepStrictEqual([alice.progressRaw, alice.progress, alice.progressCapped], [108, 108, false]);
+      assert.strictEqual(b.rules.progressTotalCap, 150);
+      assert.strictEqual(b.rules.crownMaxJumpPct, 50);
 
       const bob = b.entries.find(e => e.username === U.bob.username);
       assert.deepStrictEqual(bob.consistency, { days: 6, countedDays: 4, points: 40 });

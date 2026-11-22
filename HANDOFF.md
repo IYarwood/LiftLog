@@ -328,11 +328,17 @@ rep range). Timezone defaults to `America/New_York`; set `LEADERBOARD_TZ=<IANA z
   sets with 1–12 reps and weight > 0, this period vs the 8 weeks before the period
   started. Points = round(% gain × 10), min 0, cap 50/week or 100/month per exercise.
   No baseline → 0 (sets the baseline). Gain > 25% → 0 (ignored as a likely typo).
+  All progress points together are capped at `PROGRESS_TOTAL_CAP` = 150/week, 400/month
+  (`progressRaw` / `progress` / `progressCapped` in the API; "capped" line in the UI).
 - **Consistency:** 10 pts per distinct local day with a finished workout that logged at
   least one set with reps ≥ 1; cap 4 days/week, 16 days/month.
 - **Strength:** heaviest weight (reps ≥ 1, weight > 0); tiebreak more reps, then earliest
   finished session. e1RM is shown only for ≤ 12 reps and never used for ranking.
   Bodyweight sets (weight 0) don't appear.
+  **Crown guard** (`CROWN_MAX_JUMP_PCT` = 50): a user's top lift only ranks if another lift
+  of theirs for that exercise is within 50% of it (top ≤ next × 1.5). Otherwise it's
+  returned in `unverified` (greyed out in the UI) and their next lift ranks instead; with
+  only one lift, they have no ranked entry yet and the exercise may have `holder: null`.
 
 ---
 

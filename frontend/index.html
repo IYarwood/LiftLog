@@ -1467,7 +1467,7 @@ function renderPoints(data) {
   const r = data.rules;
   el('lb-head').innerHTML = `
     <div class="lb-period">${esc(fmtDay(data.startDate))} – ${esc(fmtDay(data.endDate))} · <span class="text-accent">${esc(resetsIn(data.end))}</span></div>
-    <div class="lb-rules">+1% on your best estimated 1RM vs your last ${r.baselineWeeks} weeks = ${r.pointsPerPercent} pts (max ${r.progressCap} per exercise) · ${r.pointsPerDay} pts per workout day (max ${r.daysCap}) · tap a row for details</div>`;
+    <div class="lb-rules">+1% on your best estimated 1RM vs your last ${r.baselineWeeks} weeks = ${r.pointsPerPercent} pts (max ${r.progressCap} per exercise, ${r.progressTotalCap} total this ${word}; jumps over ${r.maxGainPct}% don't count) · ${r.pointsPerDay} pts per workout day (max ${r.daysCap}) · tap a row for details</div>`;
   const noPoints = data.entries.every(e => e.total === 0);
   el('lb-list').innerHTML = (noPoints
       ? `<div class="empty" style="padding:4px 0 14px;">no points yet this ${word} — finish a workout to get on the board</div>` : '')
@@ -1504,7 +1504,12 @@ function pointsBreakdown(e, data) {
       <span class="val${x.points ? '' : ' zero'}">${x.points}</span>
     </div>`;
   }).join('') : `<div class="lb-line"><span class="main text-d">no lifts in the 1–${data.rules.maxReps} rep range this ${data.period}</span></div>`;
-  return `<div class="lb-detail">${consistency}${lifts}</div>`;
+  const cap = e.progressCapped ? `
+    <div class="lb-line">
+      <span class="main">progress total<span class="sub">${e.progressRaw} pts → capped at ${data.rules.progressTotalCap} per ${data.period}</span></span>
+      <span class="val">${e.progress}</span>
+    </div>` : '';
+  return `<div class="lb-detail">${consistency}${cap}${lifts}</div>`;
 }
 
 function renderStrength(data) {
@@ -1548,7 +1553,7 @@ function strengthDetail(key) {
     </div>`).join('')}${(d.unverified || []).map(e => `
     <div class="lb-line unverified">
       <span class="lb-rank" style="font-size:17px;">–</span>
-      <span class="main">@${esc(e.username)}${e.isYou ? ' (you)' : ''}<span class="lb-unv">unverified</span><span class="sub">${esc(fmtShortDate(e.date))} · more than ${d.crownMaxJumpPct ?? 50}% above their next-best — counts once backed up${e.edited ? editedTag() : ''}</span></span>
+      <span class="main">@${esc(e.username)}${e.isYou ? ' (you)' : ''}<span class="lb-unv">unverified</span><span class="sub">${esc(fmtShortDate(e.date))} · counts once backed up by another lift within ${d.crownMaxJumpPct ?? 50}% of it${e.edited ? editedTag() : ''}</span></span>
       <span class="val">${fmtNum(e.weight)}<small style="font-family:var(--mono); font-size:10px; color:var(--text-d);"> × ${e.reps}</small></span>
     </div>`).join('')}</div>`;
 }

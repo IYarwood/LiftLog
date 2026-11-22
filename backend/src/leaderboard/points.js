@@ -17,6 +17,9 @@ const BASELINE_WEEKS = 8;
 // Progress points = round(% improvement × POINTS_PER_PERCENT), capped per exercise.
 const POINTS_PER_PERCENT = 10;
 const PROGRESS_CAP = { week: 50, month: 100 };
+// ...and all of a user's progress points together are capped per period.
+// Consistency points are separate (they have their own DAYS_CAP).
+const PROGRESS_TOTAL_CAP = { week: 150, month: 400 };
 
 // An improvement over this many percent in one period is ignored (0 points):
 // most likely a typo (2250 for 225) or cheating.
@@ -140,6 +143,10 @@ function buildBoard({ users, lifts, days, period, viewerId }) {
   }
   const entries = [...byUser.values()];
   for (const e of entries) {
+    // progressRaw = sum over exercises; progress = after the per-period total cap
+    e.progressRaw = e.progress;
+    e.progress = Math.min(e.progressRaw, PROGRESS_TOTAL_CAP[period]);
+    e.progressCapped = e.progressRaw > e.progress;
     e.consistency = consistencyPoints(days.get(e.id) || 0, period);
     e.total = e.progress + e.consistency.points;
     e.exercises.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
@@ -151,7 +158,7 @@ function buildBoard({ users, lifts, days, period, viewerId }) {
 
 module.exports = {
   TIMEZONE, E1RM_MIN_REPS, E1RM_MAX_REPS, BASELINE_WEEKS, POINTS_PER_PERCENT,
-  PROGRESS_CAP, MAX_PLAUSIBLE_GAIN_PCT, POINTS_PER_DAY, DAYS_CAP, PERIODS, CROWN_MAX_JUMP_PCT,
+  PROGRESS_CAP, PROGRESS_TOTAL_CAP, MAX_PLAUSIBLE_GAIN_PCT, POINTS_PER_DAY, DAYS_CAP, PERIODS, CROWN_MAX_JUMP_PCT,
   e1rm, progressPoints, consistencyPoints, assignRanks, buildBoard, round1,
   isVerifiedLift, strengthStandings,
 };

@@ -348,7 +348,7 @@
     <div class="text-d" style="margin-bottom:16px;">add, rename or remove — this list is shared by everyone. Past workouts keep the name they were logged with.</div>
     <div class="ex-add-row">
       <input class="search-input" id="manage-new" type="text" maxlength="60" placeholder="new exercise..."
-        autocomplete="off" enterkeyhint="done" onkeydown="if(event.key==='Enter'){addLibraryExercise();}">
+        autocomplete="off" enterkeyhint="done" onkeydown="manageNewKey(event)">
       <button class="mini-btn accent" onclick="addLibraryExercise()">add</button>
     </div>
     <div class="form-msg" id="manage-msg"></div>
@@ -1070,6 +1070,11 @@ function renderManage() {
 }
 
 function addLibraryExercise() { return manageWrite(doAddLibraryExercise); }
+// "new exercise..." box: Enter adds; Escape clears the box and any stale message.
+function manageNewKey(e) {
+  if (e.key === 'Enter') addLibraryExercise();
+  if (e.key === 'Escape') { e.target.value = ''; manageMsg(''); }
+}
 async function doAddLibraryExercise() {
   const input = el('manage-new');
   const name = input.value.trim();
@@ -1266,7 +1271,7 @@ Object.assign(window, {
   removeExercise,
   addSet, saveSet, removeSet, updateSetField,
   openOverlay, renderOverlay, overlayBgClick, openDetail, renderManage,
-  openManage, addLibraryExercise,
+  openManage, addLibraryExercise, manageNewKey,
   logout,
   onFriendSearch, sendRequest, acceptRequest, declineRequest, cancelRequest, removeFriend,
   openFriendHistory, loadMoreFriendHistory, openFhItem, loadMoreFeed, openFeedItem,

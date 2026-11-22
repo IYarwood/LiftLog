@@ -227,7 +227,7 @@ All `/api/sessions/*` routes now require `Authorization: Bearer <token>`.
 
 ## Known gotchas
 - `GET /api/sessions/active` must be registered BEFORE `GET /api/sessions/:id` in the router — already handled correctly in `sessions.js`.
-- `updateSetField` debounces API calls by 600ms to avoid hammering the server on every keystroke — intentional.
+- `updateSetField` debounces API calls by 600ms to avoid hammering the server on every keystroke — intentional. The queue lives in `frontend/js/saveQueue.js`: it captures the target ids at edit time and merges a set's fields. `finishSession` and `reloadActive` await `setSaves.flushAll()` first, so nothing typed just before FINISH is lost.
 - Exercise names can contain spaces/apostrophes. DELETE uses `:name` as a URL param — `encodeURIComponent` on frontend (done), `req.params.name` in query (done).
 - `exerciseStats` computes PR/avg from the in-memory `sessions` array. Stats for the active session won't include the current workout — by design.
 

@@ -505,12 +505,25 @@ async function startSession() {
   showView('workout');
 }
 
+let finishing = false;   // a second tap while the first is still saving does nothing
 async function finishSession() {
-  if (!active) return;
-  await PATCH(`/sessions/${active.id}/finish`);
-  sessions = [{ ...active, finishedAt: new Date().toISOString() }, ...sessions];
-  active = null;
-  showView('home');
+  if (!active || finishing) return;
+  finishing = true;
+  try {
+    // Edits typed in the last 600ms are still waiting to be sent: send them
+    // (and wait) before the session is closed, or they'd be lost.
+    if (!(await setSaves.flushAll())) {
+      alert('Some set changes could not be saved — check your connection and tap FINISH again.');
+      return;
+    }
+    const sess = active;
+    await PATCH(`/sessions/${sess.id}/finish`);
+    sessions = [{ ...sess, finishedAt: new Date().toISOString() }, ...sessions];
+    active = null;
+    showView('home');
+  } finally {
+    finishing = false;
+  }
 }
 
 // ─── Exercise management in session ──────────────────────────────────────────

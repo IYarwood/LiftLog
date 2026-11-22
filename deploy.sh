@@ -15,7 +15,12 @@ main() {
   ./stamp-assets.sh --reset
 
   echo "→ Pulling latest changes..."
-  git pull
+  if ! git pull; then
+    # Don't leave the live site on ?v=dev: re-stamp what is checked out.
+    echo "✗ git pull failed — re-stamping the current checkout and stopping." >&2
+    ./stamp-assets.sh
+    exit 1
+  fi
 
   echo "→ Cache-busting frontend JS/CSS..."
   ./stamp-assets.sh

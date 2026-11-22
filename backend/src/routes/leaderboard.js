@@ -147,7 +147,7 @@ async function strengthRows(viewerId, key) {
     `WITH ${BOARD_CTE},
      best AS (
        SELECT DISTINCT ON (lower(se.name), s.user_id)
-              lower(se.name) AS key, se.name, s.user_id, st.weight, st.reps, s.finished_at
+              lower(se.name) AS key, se.name, s.user_id, st.weight, st.reps, s.finished_at, (s.edited_at IS NOT NULL) AS edited
          FROM sessions s
          JOIN session_exercises se ON se.session_id = s.id
          JOIN sets st ON st.session_exercise_id = se.id
@@ -157,7 +157,7 @@ async function strengthRows(viewerId, key) {
         ORDER BY lower(se.name), s.user_id, st.weight DESC, st.reps DESC, s.finished_at ASC
      )
      SELECT b.key, COALESCE(ex.name, b.name) AS name, u.id AS user_id, u.username,
-            b.weight, b.reps, b.finished_at
+            b.weight, b.reps, b.finished_at, b.edited
        FROM best b
        JOIN users u ON u.id = b.user_id
        LEFT JOIN exercises ex ON lower(ex.name) = b.key
@@ -177,6 +177,7 @@ function strengthEntry(row, viewerId) {
     // e1RM is shown as extra info only; it's meaningless past 12 reps.
     e1rm: row.reps <= P.E1RM_MAX_REPS ? P.round1(P.e1rm(weight, row.reps)) : null,
     date: row.finished_at,
+    edited: row.edited === true,   // PR comes from a workout edited after finishing
   };
 }
 

@@ -204,6 +204,16 @@ All `/api/sessions/*` routes now require `Authorization: Bearer <token>`.
 | POST | `/api/sessions/:id/exercises/:exId/sets` | `{ id }` | Add empty set. Position = last + 1 (server-assigned) |
 | PATCH | `/api/sessions/:id/exercises/:exId/sets/:setId` | `{ reps?, weight?, savedAt? }` | Update set fields. Omitted field = unchanged; `null` (or `''`) = clear. reps 0–9999 whole, weight 0–9999.99, else **400** |
 | DELETE | `/api/sessions/:id/exercises/:exId/sets/:setId` | — | Remove set |
+| DELETE | `/api/sessions/:id` | — | Delete a whole workout (owner only; a finished one only inside the edit window) |
+
+**Edit window.** The writes above (add/remove exercise, add/edit/remove set, delete workout)
+also work on a FINISHED workout, but only for its owner and only within
+`EDIT_WINDOW_DAYS` (7, `backend/src/db/editWindow.js`) of `finished_at`. After that they
+return **403** `{ error: "Editing closed: ...", code: "edit_window_closed" }`. In-progress
+workouts are never limited. Any write to a finished workout sets `sessions.edited_at`
+(shown as an "edited" tag in the detail view, the feed and on strength-board PRs).
+`PATCH /finish` on an already-finished workout is a 200 no-op (it no longer moves `finished_at`).
+Session shape gains `editedAt` (null if never edited) and `editableUntil`.
 
 ### Session shape returned by API
 ```json
@@ -323,3 +333,22 @@ rep range). Timezone defaults to `America/New_York`; set `LEADERBOARD_TZ=<IANA z
 - **Strength:** heaviest weight (reps ≥ 1, weight > 0); tiebreak more reps, then earliest
   finished session. e1RM is shown only for ≤ 12 reps and never used for ranking.
   Bodyweight sets (weight 0) don't appear.
+
+---
+
+## Edited-workouts migration (one-time, on the VPS)
+
+Adds the nullable `sessions.edited_at` column. Idempotent, safe to re-run, and harmless
+to the old code, so apply it BEFORE deploying: the new code reads the column (the
+leaderboard strength query fails without it). Same statement as
+`backend/migrations/2026-11-23-session-edited-at.sql`, inlined because that file only
+arrives with the pull that `deploy.sh` does.
+
+```bash
+cd /var/work/LiftLog
+set -a; . backend/.env; set +a
+pg_dump "$DATABASE_URL" -Fc -f ~/liftlog-$(date +%F-%H%M).dump      # backup
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'ALTER TABLE sessions ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;'
+psql "$DATABASE_URL" -c '\d sessions'     # expect: edited_at | timestamp with time zone
+./deploy.sh                                 # pull, stamp, npm install, pm2 restart liftlog
+```

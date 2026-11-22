@@ -51,6 +51,7 @@ const norm = (s) => s.replace(/--.*$/gm, '').replace(/\s+/g, ' ').trim();
 for (const [file, minStmts] of [
   ['2026-11-21-friends.sql', 4],
   ['2026-11-22-exercise-name-ci-unique.sql', 2],
+  ['2026-11-23-session-edited-at.sql', 1],
 ]) {
   test(`${file} matches schema.sql and is idempotent`, () => {
     const mig = fs.readFileSync(path.resolve(__dirname, '../migrations', file), 'utf8');

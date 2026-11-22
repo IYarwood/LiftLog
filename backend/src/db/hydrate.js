@@ -51,6 +51,7 @@ async function hydrateSessions(rows) {
       id: r.id,
       startedAt: r.started_at,
       finishedAt: r.finished_at,
+      editedAt: r.edited_at || null,
       exercises: exBySession.get(r.id) || [],
     };
     if (r.username !== undefined) out.username = r.username;

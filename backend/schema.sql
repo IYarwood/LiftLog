@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 
+-- Edited marker: set when a FINISHED session is changed (within the edit window)
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS session_exercises (
   id TEXT PRIMARY KEY,           -- client-generated uid
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

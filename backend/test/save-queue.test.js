@@ -169,3 +169,49 @@ test('dropWhere removes saves whose target no longer exists', async () => {
   await q.flushAll();
   assert.deepStrictEqual(sent.map(x => x.target.setId), ['s1']);
 });
+
+// ─── In-flight sends (review round 3) ─────────────────────────────────────────
+test('flushAll waits for a send the timer already started', async () => {
+  const { createSaveQueue } = await load();
+  let landed = false;
+  const q = createSaveQueue(async () => { await sleep(60); landed = true; }, 5);
+  q.schedule('s1', { setId: 's1' }, { reps: '5' });
+  await sleep(20);                        // timer fired; nothing pending, send in flight
+  assert.strictEqual(q.size, 0);
+  assert.strictEqual(await q.flushAll(), true);
+  assert.strictEqual(landed, true);       // FINISH / reload only proceed after it landed
+});
+
+test('flushAll reports an in-flight send that fails, and keeps it for retry', async () => {
+  const { createSaveQueue } = await load();
+  mock.method(console, 'error', () => {});
+  let fail = true;
+  const q = createSaveQueue(async () => { await sleep(40); if (fail) throw new Error('offline'); }, 5);
+  q.schedule('s1', { setId: 's1' }, { reps: '5' });
+  await sleep(15);                        // in flight
+  assert.strictEqual(await q.flushAll(), false);
+  assert.deepStrictEqual(q.pendingFields('s1'), { reps: '5' });
+  fail = false;
+  assert.strictEqual(await q.flushAll(), true);
+});
+
+test('sends for one set run in order: a slow older send cannot land after a newer one', async () => {
+  const { createSaveQueue } = await load();
+  const server = [];
+  const q = createSaveQueue(async (t, f) => { await sleep(f.reps === '5' ? 60 : 5); server.push(f.reps); }, 5);
+  q.schedule('s1', { setId: 's1' }, { reps: '5' });
+  await sleep(15);                        // reps=5 in flight (slow)
+  q.schedule('s1', { setId: 's1' }, { reps: '55' });
+  assert.strictEqual(await q.flushAll(), true);
+  assert.deepStrictEqual(server, ['5', '55']);   // final server value is the newest
+});
+
+test('different sets are sent in parallel', async () => {
+  const { createSaveQueue } = await load();
+  const q = createSaveQueue(async () => { await sleep(50); }, 600);
+  q.schedule('a', { setId: 'a' }, { reps: '1' });
+  q.schedule('b', { setId: 'b' }, { reps: '2' });
+  const t0 = Date.now();
+  await q.flushAll();
+  assert.ok(Date.now() - t0 < 95, 'took ' + (Date.now() - t0) + 'ms');
+});

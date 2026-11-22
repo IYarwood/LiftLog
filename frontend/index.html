@@ -186,7 +186,7 @@
 
   .ex-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
   .ex-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
-  .ex-del { flex-shrink: 0; background: none; border: none; color: var(--text-f); font-size: 20px; line-height: 1; padding: 2px 6px; min-width: 36px; min-height: 36px; }
+  .ex-del { flex-shrink: 0; background: none; border: none; color: var(--text-f); font-size: 20px; line-height: 1; padding: 2px 6px; min-width: 44px; min-height: 44px; }
   .ex-del:active { color: var(--danger); }
   /* "already in this workout" — briefly highlight the existing card */
   @keyframes cardflash { 0%,100% { border-color: var(--border); box-shadow: none; } 25%,60% { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); } }
@@ -194,7 +194,7 @@
 
   .ex-manage-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); min-height: 52px; }
   .ex-manage-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-d); }
-  .ex-manage-row .mini-btn { padding: 0 10px; height: 44px; min-width: 44px; }
+  .ex-manage-row .mini-btn { padding: 0 10px; }
   .ex-edit-input {
     flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border);
     border-radius: 6px; padding: 7px 10px; color: var(--text); font-family: var(--mono); font-size: 16px;
@@ -243,7 +243,7 @@
   .friend-name .sub { display: block; font-size: 10px; color: var(--text-d); margin-top: 2px; }
   .mini-btn {
     flex-shrink: 0; background: none; border: 1px solid var(--border); border-radius: 6px;
-    color: var(--text-d); font-size: 11px; letter-spacing: 0.5px; padding: 0 12px; height: 34px;
+    color: var(--text-d); font-size: 11px; letter-spacing: 0.5px; padding: 0 12px; height: 44px; min-width: 44px;
   }
   .mini-btn.accent { background: var(--accent-dim); border-color: rgba(74,240,176,0.25); color: var(--accent-t); }
   .mini-btn.danger:active { color: var(--danger); border-color: var(--danger); }

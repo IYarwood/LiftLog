@@ -55,6 +55,16 @@
   .nav-btn { background: none; border: none; color: var(--text-d); font-size: 11px; padding: 6px 10px; border-radius: 6px; letter-spacing: 0.5px; }
   .nav-btn.active { color: var(--accent-t); }
   .nav-btn:active { background: var(--surface); }
+  .nav-btn { flex-shrink: 0; white-space: nowrap; }
+  @media (max-width: 400px) {
+    #nav { padding-left: 14px; padding-right: 10px; gap: 2px; }
+    .nav-logo { font-size: 24px; letter-spacing: 2px; margin-right: 4px; }
+    .nav-btn { padding: 6px 7px; }
+  }
+  @media (max-width: 360px) {
+    .nav-logo { font-size: 22px; letter-spacing: 1.5px; margin-right: 2px; }
+    .nav-btn { padding: 6px 6px; letter-spacing: 0; }
+  }
 
   #main {
     flex: 1;
@@ -109,7 +119,14 @@
   .stat-label { font-size: 9px; color: var(--text-d); letter-spacing: 1.5px; text-transform: uppercase; }
   .stat-val { font-family: var(--disp); font-size: 18px; letter-spacing: 1px; }
 
-  .pill { background: var(--accent-dim); color: var(--accent-t); border-radius: 4px; padding: 2px 7px; font-size: 10px; letter-spacing: 1px; display: inline-block; margin: 2px; }
+  .pill { background: var(--accent-dim); color: var(--accent-t); border-radius: 4px; padding: 2px 7px; font-size: 10px; letter-spacing: 1px; display: inline-block; margin: 2px; max-width: 100%; line-height: 1.5; }
+
+  /* Exercise names are free text (up to 60 chars, possibly one unbroken word):
+     let them break anywhere so they never widen the page. Flex children that
+     hold them need min-width:0 or they refuse to shrink below the word. */
+  .disp-lg, .disp-md, .disp-sm, .pill, .ex-manage-name, .ex-pick-btn, .ex-create-btn { overflow-wrap: anywhere; word-break: break-word; }
+  .flex-fill { flex: 1; min-width: 0; }
+  .no-shrink { flex-shrink: 0; }
 
   .set-headers { display: grid; grid-template-columns: 28px 1fr 1fr 56px 28px; gap: 6px; margin-bottom: 4px; padding: 0 2px; }
   .set-header-cell { font-size: 9px; color: var(--muted); letter-spacing: 1px; text-align: center; }
@@ -168,14 +185,20 @@
   .ex-create-btn:active { opacity: 0.75; }
 
   .ex-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
-  .ex-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
-  .ex-del { background: none; border: none; color: var(--text-f); font-size: 20px; line-height: 1; padding: 2px 6px; }
+  .ex-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
+  .ex-del { flex-shrink: 0; background: none; border: none; color: var(--text-f); font-size: 20px; line-height: 1; padding: 2px 6px; min-width: 36px; min-height: 36px; }
   .ex-del:active { color: var(--danger); }
 
-  .ex-manage-row { display: flex; justify-content: space-between; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--border); }
-  .ex-manage-name { font-size: 13px; color: var(--text-d); }
-  .ex-remove-btn { background: none; border: none; color: var(--text-f); font-family: var(--mono); font-size: 11px; padding: 4px 8px; }
-  .ex-remove-btn:active { color: var(--danger); }
+  .ex-manage-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); min-height: 52px; }
+  .ex-manage-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-d); }
+  .ex-manage-row .mini-btn { padding: 0 10px; }
+  .ex-edit-input {
+    flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px; color: var(--text); font-family: var(--mono); font-size: 16px;
+  }
+  .ex-add-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .ex-add-row .search-input { flex: 1; min-width: 0; margin-bottom: 0; }
+  .ex-add-row .mini-btn { height: auto; }
 
   .search-input {
     width: 100%; background: var(--card); border: 1px solid var(--border);
@@ -235,6 +258,7 @@
   <span class="nav-logo">LIFTLOG</span>
   <span class="nav-spacer"></span>
   <button class="nav-btn" id="btn-back" onclick="goBack()" style="display:none">← back</button>
+  <button class="nav-btn" id="btn-exercises" onclick="openManage()">exercises</button>
   <button class="nav-btn" id="btn-logout" onclick="logout()">log out</button>
 </nav>
 
@@ -243,13 +267,13 @@
   <!-- HOME -->
   <div class="view active" id="view-home">
     <div id="in-progress-banner" class="card clickable" onclick="showView('workout')" style="border-color: rgba(74,240,176,0.3); margin-bottom:16px;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-        <div>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+        <div class="flex-fill">
           <span class="pill">IN PROGRESS</span>
           <div class="disp-md" id="banner-title" style="margin-top:8px;"></div>
           <div class="text-d" id="banner-sub"></div>
         </div>
-        <span style="color:var(--accent); font-size:20px;">→</span>
+        <span class="no-shrink" style="color:var(--accent); font-size:20px;">→</span>
       </div>
     </div>
 
@@ -318,8 +342,15 @@
   <!-- MANAGE EXERCISES -->
   <div class="view" id="view-manage">
     <div class="disp-lg">EXERCISES</div>
-    <div class="text-d" style="margin-bottom:16px;">add or remove from your library</div>
-    <input class="search-input" id="manage-filter" placeholder="filter..." oninput="renderManage()">
+    <div class="text-d" style="margin-bottom:16px;">add, rename or remove — this list is shared by everyone. Past workouts keep the name they were logged with.</div>
+    <div class="ex-add-row">
+      <input class="search-input" id="manage-new" type="text" maxlength="60" placeholder="new exercise..."
+        autocomplete="off" enterkeyhint="done" onkeydown="if(event.key==='Enter'){addLibraryExercise();}">
+      <button class="mini-btn accent" onclick="addLibraryExercise()">add</button>
+    </div>
+    <div class="form-msg" id="manage-msg"></div>
+    <input class="search-input" id="manage-filter" type="text" maxlength="60" placeholder="filter..."
+      autocomplete="off" autocorrect="off" spellcheck="false" oninput="renderManage()">
     <div id="manage-list"></div>
   </div>
 
@@ -353,6 +384,9 @@ let currentView = 'home';
 let detailSession = null;
 let detailOwner = null;      // null = my session; username = a friend's (read-only)
 let detailReturn = 'history'; // view to go back to from session detail
+let manageReturn = 'home';    // view to go back to from the exercises page
+let manageEditing = null;     // library name currently being renamed, or null
+let manageDraft = '';         // text in the rename input (survives re-renders)
 
 // Friends state
 let friendsData = { friends: [], incoming: [], outgoing: [] };
@@ -405,8 +439,10 @@ function showView(name, opts = {}) {
   // Sub-views keep their parent tab highlighted
   const tab = name === 'session-detail' ? (TAB_VIEWS.includes(detailReturn) ? detailReturn : 'friends')
     : name === 'friend-history' ? 'friends'
+    : name === 'manage' ? null   // opened from the top bar, not a tab
     : TAB_VIEWS.includes(name) ? name : 'home';
   TAB_VIEWS.forEach(t => el('tab-' + t).classList.toggle('active', t === tab));
+  el('btn-exercises').classList.toggle('active', name === 'manage');
   if (name === 'home') renderHome();
   if (name === 'feed') { if (opts.keep && feedItems.length) renderFeed(); else loadFeed(true); }
   if (name === 'friends') loadFriends();
@@ -414,13 +450,13 @@ function showView(name, opts = {}) {
   if (name === 'history') renderHistory();
   if (name === 'workout') renderWorkout();
   if (name === 'session-detail') renderDetail();
-  if (name === 'manage') renderManage();
+  if (name === 'manage') loadManage();
   window.scrollTo(0, 0);
 }
 function goBack() {
   if (currentView === 'session-detail') { showView(detailReturn, { keep: true }); return; }
   if (currentView === 'friend-history') { showView('friends'); return; }
-  if (currentView === 'manage') { showView('home'); return; }
+  if (currentView === 'manage') { showView(manageReturn, { keep: true }); return; }
   showView('home');
 }
 
@@ -559,13 +595,13 @@ function renderHome() {
   lbl.style.display = '';
   recent.innerHTML = sessions.slice(0, 5).map(s => `
     <div class="card clickable" onclick="openDetail(${jsArg(s.id)})">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <div>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <div class="flex-fill">
           <div class="disp-sm">${fmtDate(s.startedAt)}</div>
           <div class="text-d">${s.exercises.length} exercises · ${s.exercises.reduce((a,e)=>a+e.sets.length,0)} sets</div>
           <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${esc(e.name)}</span>`).join('')}</div>
         </div>
-        <span style="color:var(--text-f); font-size:18px;">›</span>
+        <span class="no-shrink" style="color:var(--text-f); font-size:18px;">›</span>
       </div>
     </div>
   `).join('');
@@ -626,7 +662,7 @@ function renderWorkout(flashSetId) {
     return `
       <div class="ex-card">
         <div class="ex-header">
-          <div>
+          <div class="flex-fill">
             <div class="disp-md">${esc(ex.name)}</div>
             ${statsHtml}
           </div>
@@ -648,13 +684,13 @@ function renderHistory() {
   }
   list.innerHTML = sessions.map(s => `
     <div class="card clickable" onclick="openDetail(${jsArg(s.id)})">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-        <div>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+        <div class="flex-fill">
           <div class="disp-sm">${fmtDate(s.startedAt)}</div>
           <div class="text-d">${fmtTime(s.startedAt)}${s.finishedAt ? ' → ' + fmtTime(s.finishedAt) : ''}</div>
           <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${esc(e.name)}</span>`).join('')}</div>
         </div>
-        <span style="color:var(--text-f); font-size:18px;">›</span>
+        <span class="no-shrink" style="color:var(--text-f); font-size:18px;">›</span>
       </div>
     </div>
   `).join('');
@@ -728,13 +764,13 @@ function sessionCard(s, onclick, showWho) {
   return `
     <div class="card clickable" onclick="${onclick}">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-        <div style="min-width:0;">
+        <div class="flex-fill">
           ${showWho ? `<div class="who">@${esc(s.username)}</div>` : ''}
           <div class="disp-sm">${fmtDate(s.startedAt)}</div>
           <div class="text-d">${fmtTime(s.startedAt)}${s.finishedAt ? ' → ' + fmtTime(s.finishedAt) : ''} · ${(s.exercises||[]).length} exercises · ${sets} sets</div>
           <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${esc(e.name)}</span>`).join('')}</div>
         </div>
-        <span style="color:var(--text-f); font-size:18px;">›</span>
+        <span class="no-shrink" style="color:var(--text-f); font-size:18px;">›</span>
       </div>
     </div>`;
 }
@@ -929,21 +965,129 @@ function renderFeed() {
 function loadMoreFeed() { loadFeed(false); }
 function openFeedItem(i) { if (feedItems[i]) openFriendDetail(feedItems[i], 'feed'); }
 
-// ─── Render: Manage ───────────────────────────────────────────────────────────
-function renderManage() {
-  const filter = (el('manage-filter').value || '').toLowerCase();
-  const filtered = exercises.filter(e => e.toLowerCase().includes(filter));
-  el('manage-list').innerHTML = filtered.map(name => `
-    <div class="ex-manage-row">
-      <span class="ex-manage-name">${esc(name)}</span>
-      <button class="ex-remove-btn" data-name="${esc(name)}">remove</button>
-    </div>
-  `).join('');
+// ─── Manage exercises (shared library) ───────────────────────────────────────
+// The library is shared by every user. Renaming changes the library only; logged
+// workouts keep the name they were recorded with (the server never rewrites them).
+function openManage() {
+  if (currentView === 'manage') return;
+  manageReturn = currentView;
+  manageEditing = null;
+  manageMsg('');
+  showView('manage');
+}
+function manageMsg(text, isErr) {
+  el('manage-msg').textContent = text || '';
+  el('manage-msg').classList.toggle('err', !!isErr);
+}
+function sortExercises() { exercises.sort((a, b) => a.localeCompare(b)); }
+const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
+// One library write at a time, so a double-tap can't send the same request twice.
+let manageBusy = false;
+async function manageWrite(fn) {
+  if (manageBusy) return;
+  manageBusy = true;
+  try { await fn(); } finally { manageBusy = false; }
 }
 
-async function removeExercise_lib(name) {
-  await DELETE(`/exercises/${encodeURIComponent(name)}`);
+// Other people may have changed the list, so refresh it whenever the page opens.
+async function loadManage() {
+  renderManage();
+  try { exercises = await GET('/exercises'); } catch (err) { console.error(err); return; }
+  if (manageEditing !== null && !exercises.includes(manageEditing)) manageEditing = null;
+  if (currentView === 'manage') renderManage();
+}
+
+function renderManage() {
+  const filter = (el('manage-filter').value || '').toLowerCase();
+  const filtered = exercises.filter(e => e.toLowerCase().includes(filter) || e === manageEditing);
+  const list = el('manage-list');
+  if (!filtered.length) {
+    list.innerHTML = `<div class="empty">${exercises.length ? 'no exercises match' : 'no exercises yet'}</div>`;
+    return;
+  }
+  list.innerHTML = filtered.map(name => name === manageEditing ? `
+    <div class="ex-manage-row">
+      <input class="ex-edit-input" type="text" maxlength="60" value="${esc(manageDraft)}"
+        aria-label="new name" autocomplete="off" enterkeyhint="done">
+      <button class="mini-btn accent ex-save-btn" data-name="${esc(name)}">save</button>
+      <button class="mini-btn ex-cancel-btn" data-name="${esc(name)}">cancel</button>
+    </div>` : `
+    <div class="ex-manage-row">
+      <span class="ex-manage-name">${esc(name)}</span>
+      <button class="mini-btn ex-edit-btn" data-name="${esc(name)}">edit</button>
+      <button class="mini-btn danger ex-remove-btn" data-name="${esc(name)}">remove</button>
+    </div>`).join('');
+}
+
+function addLibraryExercise() { return manageWrite(doAddLibraryExercise); }
+async function doAddLibraryExercise() {
+  const input = el('manage-new');
+  const name = input.value.trim();
+  if (!name) return;
+  const dup = exercises.find(e => sameName(e, name));
+  if (dup) { manageMsg(`"${dup}" is already in the list`, true); return; }
+  try {
+    await POST('/exercises', { name });
+  } catch (err) {
+    manageMsg(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not add exercise — try again.', true);
+    return;
+  }
+  if (!exercises.includes(name)) exercises.push(name);
+  sortExercises();
+  input.value = '';
+  manageMsg(`added "${name}"`);
+  renderManage();
+}
+
+function startRename(name) {
+  manageEditing = name;
+  manageDraft = name;
+  manageMsg('');
+  renderManage();
+  const input = el('manage-list').querySelector('.ex-edit-input');
+  if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+}
+function cancelRename() {
+  manageEditing = null;
+  renderManage();
+}
+function saveRename(oldName) { return manageWrite(() => doSaveRename(oldName)); }
+async function doSaveRename(oldName) {
+  const name = manageDraft.trim();
+  if (!name) { manageMsg(EXERCISE_NAME_MSG, true); return; }
+  if (name === oldName) { cancelRename(); return; }
+  try {
+    const res = await PATCH(`/exercises/${encodeURIComponent(oldName)}`, { name });
+    exercises = exercises.map(e => e === oldName ? res.name : e);
+    sortExercises();
+    manageEditing = null;
+    manageMsg(`renamed to "${res.name}"`);
+  } catch (err) {
+    if (err.status === 409) { manageMsg('another exercise already has that name', true); return; }
+    if (err.status === 400) { manageMsg(EXERCISE_NAME_MSG, true); return; }
+    if (err.status === 404) {
+      manageMsg('that exercise was removed or renamed by someone else — list refreshed', true);
+      manageEditing = null;
+      loadManage();
+      return;
+    }
+    manageMsg('Could not rename exercise — try again.', true);
+    return;
+  }
+  renderManage();
+}
+
+function removeExercise_lib(name) { return manageWrite(() => doRemoveExercise(name)); }
+async function doRemoveExercise(name) {
+  if (!confirm(`Remove "${name}" from the exercise list?\n\nThe list is shared, so it disappears for everyone. Past workouts keep it.`)) return;
+  try {
+    await DELETE(`/exercises/${encodeURIComponent(name)}`);
+  } catch (err) {
+    manageMsg('Could not remove exercise — try again.', true);
+    return;
+  }
   exercises = exercises.filter(e => e !== name);
+  manageMsg(`removed "${name}"`);
   renderManage();
 }
 
@@ -1024,6 +1168,17 @@ function onNameButton(containerId, selector, fn) {
 onNameButton('ex-list', '.ex-pick-btn', addExerciseToSession);
 onNameButton('create-btn-container', '.ex-create-btn', createAndAdd);
 onNameButton('manage-list', '.ex-remove-btn', removeExercise_lib);
+onNameButton('manage-list', '.ex-edit-btn', startRename);
+onNameButton('manage-list', '.ex-save-btn', saveRename);
+onNameButton('manage-list', '.ex-cancel-btn', cancelRename);
+el('manage-list').addEventListener('input', e => {
+  if (e.target.classList.contains('ex-edit-input')) manageDraft = e.target.value;
+});
+el('manage-list').addEventListener('keydown', e => {
+  if (!e.target.classList.contains('ex-edit-input') || manageEditing === null) return;
+  if (e.key === 'Enter') { e.preventDefault(); saveRename(manageEditing); }
+  if (e.key === 'Escape') cancelRename();
+});
 
 // ─── Expose inline-handler functions (module scope is not global) ─────────────
 Object.assign(window, {
@@ -1031,6 +1186,7 @@ Object.assign(window, {
   removeExercise,
   addSet, saveSet, removeSet, updateSetField,
   openOverlay, renderOverlay, overlayBgClick, openDetail, renderManage,
+  openManage, addLibraryExercise,
   logout,
   onFriendSearch, sendRequest, acceptRequest, declineRequest, cancelRequest, removeFriend,
   openFriendHistory, loadMoreFriendHistory, openFhItem, loadMoreFeed, openFeedItem,

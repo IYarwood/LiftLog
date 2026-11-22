@@ -27,6 +27,31 @@ test('parseExerciseName trims and enforces 1–60 chars', () => {
   assert.ok(parseExerciseName(['Squat']).error);
 });
 
+test('parseExerciseName rejects names made only of dots', () => {
+  for (const n of ['.', '..', '...', '  ..  ', '.'.repeat(60)]) {
+    assert.deepStrictEqual(parseExerciseName(n), { error: 'name cannot be only dots' }, JSON.stringify(n));
+  }
+  // dots alongside other characters are fine
+  assert.deepStrictEqual(parseExerciseName('..Squat'), { name: '..Squat' });
+  assert.deepStrictEqual(parseExerciseName('A.B.'), { name: 'A.B.' });
+  assert.deepStrictEqual(parseExerciseName('. .'), { name: '. .' });
+});
+
+for (const [method, url] of [
+  ['post', '/api/exercises'],
+  ['patch', '/api/exercises/Squat'],
+  ['post', '/api/sessions/s1/exercises'],
+]) {
+  test(`${method.toUpperCase()} ${url} rejects a dots-only name with 400 and no DB access`, async () => {
+    const q = mock.method(pool, 'query', async () => ({ rows: [] }));
+    const c = mock.method(pool, 'connect', async () => { throw new Error('should not connect'); });
+    const res = await auth(request(app)[method](url)).send({ id: 'ex1', name: '..' });
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.error, 'name cannot be only dots');
+    assert.strictEqual(q.mock.callCount() + c.mock.callCount(), 0);
+  });
+}
+
 // ─── POST /api/sessions/:id/exercises ─────────────────────────────────────────
 // Owned session: the route runs in a transaction on a pooled client. The
 // ownership SELECT returns a row, the duplicate check returns none; capture the

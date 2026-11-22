@@ -515,6 +515,11 @@ async function finishSession() {
 // ─── Exercise management in session ──────────────────────────────────────────
 // Server caps names at 60 chars (backend/src/validation/exerciseName.js).
 const EXERCISE_NAME_MSG = 'Exercise names must be 1–60 characters.';
+const DOTS_MSG = 'Exercise names can\'t be only dots.';
+// Message for a 400 on a name: the dots rule has its own wording.
+function nameErrorMsg(err) {
+  return err && err.body && /dots/.test(err.body.error || '') ? DOTS_MSG : EXERCISE_NAME_MSG;
+}
 
 async function addExerciseToSession(name) {
   if (!active) return;
@@ -535,7 +540,7 @@ async function addExerciseToSession(name) {
       focusExerciseCard(err.body.id);
       return;
     }
-    alert(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not add exercise — try again.');
+    alert(err.status === 400 ? nameErrorMsg(err) : 'Could not add exercise — try again.');
     return;
   }
   active.exercises.push({ id, name, sets: [] });
@@ -1083,7 +1088,7 @@ async function doAddLibraryExercise() {
       renderManage();
       return;
     }
-    manageMsg(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not add exercise — try again.', true);
+    manageMsg(err.status === 400 ? nameErrorMsg(err) : 'Could not add exercise — try again.', true);
     return;
   }
   if (!exercises.includes(name)) exercises.push(name);
@@ -1119,7 +1124,7 @@ async function doSaveRename(oldName) {
     manageMsg(`renamed to "${res.name}"`);
   } catch (err) {
     if (err.status === 409) { manageMsg('another exercise already has that name', true); return; }
-    if (err.status === 400) { manageMsg(EXERCISE_NAME_MSG, true); return; }
+    if (err.status === 400) { manageMsg(nameErrorMsg(err), true); return; }
     if (err.status === 404) {
       manageMsg('that exercise was removed or renamed by someone else — list refreshed', true);
       manageEditing = null;
@@ -1223,7 +1228,7 @@ async function createAndAdd(name) {
     if (err.status === 409) {
       name = (err.body && err.body.name) || name;
     } else {
-      alert(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not create exercise — try again.');
+      alert(err.status === 400 ? nameErrorMsg(err) : 'Could not create exercise — try again.');
       return;
     }
   }

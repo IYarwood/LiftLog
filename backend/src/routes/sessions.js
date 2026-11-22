@@ -329,6 +329,12 @@ router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
   try {
     const st = await editGate(res, req.params.id, req.params.exId, req.userId);
     if (!st) return;
+    // A FINISHED workout's stored values are never cleared by an edit (only a
+    // live workout clears a field with null while you type): fix the value or
+    // delete the set instead. Keeps a stray null from wiping a logged lift.
+    if (st.finished && ((has('reps') && fields.reps === null) || (has('weight') && fields.weight === null))) {
+      return res.status(400).json({ error: "a finished workout's set can't be cleared — enter a value or delete the set" });
+    }
     // $1/$3 say whether reps/weight were sent; if so, $2/$4 (possibly null)
     // replace the stored value.
     await pool.query(

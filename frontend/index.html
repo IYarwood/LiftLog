@@ -468,7 +468,7 @@
 <script type="module">
 import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
 import { createSaveQueue } from './js/saveQueue.js?v=dev';
-import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue } from './js/setFields.js?v=dev';
+import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue, editFieldSaveValue } from './js/setFields.js?v=dev';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let exercises = [];   // string[]
@@ -539,7 +539,11 @@ function showView(name, opts = {}) {
   if (currentView === 'manage' && name !== 'manage') { manageMsg(''); manageEditing = null; }
   if (currentView === 'session-detail' && name !== 'session-detail' && detailEditing) {
     detailEditing = false;
-    editSaves.flushAll();   // send anything typed in the last 600ms
+    // Send the valid edits typed in the last 600ms (invalid ones were never
+    // queued), then replace my copy with the server's so no invalid value
+    // lingers on screen.
+    const leftId = detailSession && detailSession.id;
+    editSaves.flushAll().then(() => refreshDetailSession(leftId));
   }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   el('view-' + name).classList.add('active');
@@ -1065,18 +1069,24 @@ function markDetailEdited() {
     el('detail-edited').innerHTML = editedTag(detailSession.editedAt);
   }
 }
-// Replace my local copy of the open session with the server's.
-async function refreshDetailSession() {
-  if (!detailSession || detailOwner) return;
-  const id = detailSession.id;
+// Replace my local copy of one of MY sessions (default: the open one) with the
+// server's.
+async function refreshDetailSession(id = (detailSession && !detailOwner) ? detailSession.id : null) {
+  if (!id) return;
+  const isOpen = () => detailSession && !detailOwner && detailSession.id === id;
   try {
     const fresh = await GET(`/sessions/${id}`);
     sessions = sessions.map(x => x.id === id ? fresh : x);
-    if (detailSession && detailSession.id === id) detailSession = fresh;
+    if (isOpen()) detailSession = fresh;
   } catch (err) {
-    if (err.status === 404) { sessions = sessions.filter(x => x.id !== id); showView('history'); return; }
+    if (err.status === 404) {
+      sessions = sessions.filter(x => x.id !== id);
+      if (currentView === 'session-detail' && isOpen()) showView('history');
+      return;
+    }
   }
-  if (currentView === 'session-detail') renderDetail();
+  if (currentView === 'session-detail' && isOpen()) renderDetail();
+  if (currentView === 'history') renderHistory();
 }
 
 function startEditing() {
@@ -1088,6 +1098,7 @@ async function doneEditing() {
   const bad = (detailSession.exercises || []).flatMap(ex => ex.sets).find(st => setErrorText(st));
   if (bad) { showSetErrors(bad.id, bad); alert(`Fix the highlighted set value first.\n${SET_LIMITS_MSG}`); return; }
   if (!(await editSaves.flushAll()) && !confirm('Some changes could not be saved. Stop editing anyway?')) return;
+  // Fields left blank were never sent: the refresh below shows the stored value again.
   detailEditing = false;
   await refreshDetailSession();
 }
@@ -1128,7 +1139,12 @@ function editSetField(exId, setId, field, val) {
   if (!st) return;
   st[field] = val;
   showSetErrors(setId, st);
-  editSaves.schedule(setId, { sessionId: detailSession.id, exId, setId }, { [field]: fieldSaveValue(field, val) });
+  // A finished workout's stored value is real: only a valid, non-blank value
+  // replaces it. Invalid/blank sends nothing (and cancels an unsent earlier
+  // keystroke for this field), so the server keeps its last value.
+  const v = editFieldSaveValue(field, val);
+  if (!v.send) { editSaves.dropField(setId, field); return; }
+  editSaves.schedule(setId, { sessionId: detailSession.id, exId, setId }, { [field]: v.value });
   markDetailEdited();
 }
 async function editAddSet(exId) {

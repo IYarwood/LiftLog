@@ -110,6 +110,21 @@ describe('editing finished workouts (integration, real test DB)', { skip }, () =
     assert.deepStrictEqual([st.reps, Number(st.weight)], [5, 210]);
   });
 
+  test("a finished workout's set can't be cleared with null (400, value kept); a live one still can", async () => {
+    for (const body of [{ reps: null }, { weight: null }, { weight: '' }, { reps: 5, weight: null }]) {
+      const r = await request(app).patch(setUrl(recent, 'Bench Press', 1)).set(auth('owner')).send(body);
+      assert.strictEqual(r.status, 400, JSON.stringify(body));
+      assert.match(r.body.error, /can't be cleared/);
+    }
+    const st = (await pool.query('SELECT reps, weight FROM sets WHERE id = $1', [recent.set['Bench Press'][1]])).rows[0];
+    assert.deepStrictEqual([st.reps, Number(st.weight)], [5, 210]);
+    const live = await request(app).patch(setUrl(active, 'Squat')).set(auth('owner')).send({ weight: null });
+    assert.strictEqual(live.status, 200);
+    const a = (await pool.query('SELECT weight FROM sets WHERE id = $1', [active.set.Squat[0]])).rows[0];
+    assert.strictEqual(a.weight, null);
+    await request(app).patch(setUrl(active, 'Squat')).set(auth('owner')).send({ weight: 100 });   // restore for later tests
+  });
+
   test('outside the window: every write is a 403 with a clear message, and nothing changes', async () => {
     const calls = [
       request(app).patch(setUrl(old, 'Bench Press')).set(auth('owner')).send({ weight: 500 }),

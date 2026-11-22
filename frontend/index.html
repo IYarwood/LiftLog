@@ -47,7 +47,7 @@
   #nav {
     position: fixed; top: 0; left: 0; right: 0; z-index: 100;
     background: var(--bg); border-bottom: 1px solid var(--border);
-    padding: calc(var(--safe-top) + 10px) 20px 10px;
+    padding: calc(var(--safe-top) + 4px) 20px 4px;   /* leaves 44px for button hit areas */
     display: flex; align-items: center; gap: 12px; height: calc(var(--safe-top) + 52px);
   }
   .nav-logo { font-family: var(--disp); font-size: 28px; letter-spacing: 3px; color: var(--accent); font-weight: 700; }
@@ -55,7 +55,7 @@
   .nav-btn { background: none; border: none; color: var(--text-d); font-size: 11px; padding: 6px 10px; border-radius: 6px; letter-spacing: 0.5px; }
   .nav-btn.active { color: var(--accent-t); }
   .nav-btn:active { background: var(--surface); }
-  .nav-btn { flex-shrink: 0; white-space: nowrap; }
+  .nav-btn { flex-shrink: 0; white-space: nowrap; min-height: 44px; min-width: 44px; }
   @media (max-width: 400px) {
     #nav { padding-left: 14px; padding-right: 10px; gap: 2px; }
     .nav-logo { font-size: 24px; letter-spacing: 2px; margin-right: 4px; }
@@ -194,14 +194,14 @@
 
   .ex-manage-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); min-height: 52px; }
   .ex-manage-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-d); }
-  .ex-manage-row .mini-btn { padding: 0 10px; }
+  .ex-manage-row .mini-btn { padding: 0 10px; height: 44px; min-width: 44px; }
   .ex-edit-input {
     flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border);
     border-radius: 6px; padding: 7px 10px; color: var(--text); font-family: var(--mono); font-size: 16px;
   }
   .ex-add-row { display: flex; gap: 8px; margin-bottom: 14px; }
   .ex-add-row .search-input { flex: 1; min-width: 0; margin-bottom: 0; }
-  .ex-add-row .mini-btn { height: auto; }
+  .ex-add-row .mini-btn { height: auto; min-height: 44px; min-width: 44px; }
 
   .search-input {
     width: 100%; background: var(--card); border: 1px solid var(--border);

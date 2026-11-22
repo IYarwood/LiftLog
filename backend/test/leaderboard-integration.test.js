@@ -133,6 +133,9 @@ describe('leaderboard (integration, real test DB)', { skip }, () => {
       // days: Monday + Wednesday (twice) = 2. Not Sunday, not the empty Friday one.
       assert.deepStrictEqual(alice.consistency, { days: 2, countedDays: 2, points: 20 });
       assert.strictEqual(alice.total, 25 + 33 + 50 + 20);
+      assert.deepStrictEqual([alice.progressRaw, alice.progress, alice.progressCapped], [108, 108, false]);
+      assert.strictEqual(b.rules.progressTotalCap, 150);
+      assert.strictEqual(b.rules.crownMaxJumpPct, 50);
 
       const bob = b.entries.find(e => e.username === U.bob.username);
       assert.deepStrictEqual(bob.consistency, { days: 6, countedDays: 4, points: 40 });
@@ -180,15 +183,20 @@ describe('leaderboard (integration, real test DB)', { skip }, () => {
       // s is a stranger
 
       // Bench: G 200×5 first, F 200×5 later, V 200×3 → G, F, V
+      await makeSession('v', t(10), [['Bench Press', 3, 180]]);   // backs up the 200 (crown guard)
       await makeSession('v', t(3), [['Bench Press', 3, 200]]);
+      await makeSession('g', t(9), [['bench press', 5, 180]]);
       await makeSession('g', t(5), [['bench press', 5, 200]]);
-      await makeSession('f', t(2), [['Bench Press', 5, 200], ['Bench Press', 10, 180]]);
+      await makeSession('f', t(6), [['Bench Press', 10, 180]]);
+      await makeSession('f', t(2), [['Bench Press', 5, 200]]);
       await makeSession('f', null, [['Bench Press', 1, 500]]);       // in progress: excluded
       await makeSession('p', t(2), [['Bench Press', 1, 400], ['Pending Only Lift', 5, 50]]);
       await makeSession('s', t(2), [['Bench Press', 1, 450], ['Stranger Only Lift', 5, 50]]);
+      await makeSession('u', t(7), [['Bench Press', 1, 140]]);
       await makeSession('u', t(2), [['Bench Press', 1, 150]]);
       await makeSession('g', null, [['Active Only Lift', 5, 50]]);   // in progress
       // High-rep set: holder, but no e1RM shown
+      await makeSession('g', t(8), [['Leg Press', 15, 280]]);
       await makeSession('g', t(4), [['Leg Press', 15, 300]]);
     });
 
@@ -271,6 +279,51 @@ describe('leaderboard (integration, real test DB)', { skip }, () => {
       assert.ok(!s.body.entries.some(e => e.username === U.u.username));
       // and v disappears from u's board too
       assert.deepStrictEqual(names((await get('u', '/api/leaderboard/weekly')).body), [U.u.username]);
+    });
+
+    test('crown guard is per WORKOUT: repeated typo sets, lone workouts, backed-up PRs', async () => {
+      // Overhead Press: f's two workouts agree (100, 105) → verified.
+      // g types 1000 for every set of ONE workout (next to a real 110 set) → that
+      // workout's best is 1000 and no other workout backs it: unverified, g unranked.
+      await makeSession('f', t(12), [['Overhead Press', 5, 100]]);
+      await makeSession('f', t(2), [['Overhead Press', 5, 105]]);
+      await makeSession('g', t(2), [['Overhead Press', 5, 110], ['Overhead Press', 5, 1000],
+        ['Overhead Press', 5, 1000], ['Overhead Press', 5, 1000]]);
+      let r = (await get('v', '/api/leaderboard/strength/overhead%20press')).body;
+      assert.deepStrictEqual(r.entries.map(e => [e.rank, e.username, e.weight]), [[1, U.f.username, 105]]);
+      assert.deepStrictEqual(r.unverified.map(e => [e.username, e.weight, e.unverified]), [[U.g.username, 1000, true]]);
+      assert.strictEqual(r.crownMaxJumpPct, 50);
+
+      // Front Squat: v's only workout → no holder yet
+      await makeSession('v', t(2), [['Front Squat', 3, 150], ['Front Squat', 3, 150]]);
+      const list = (await get('v', '/api/leaderboard/strength')).body;
+      const fs = list.exercises.find(x => x.name === 'Front Squat');
+      assert.strictEqual(fs.holder, null);
+      assert.strictEqual(fs.unverified, 1);
+
+      // a second workout exactly 50% lighter backs it up
+      await makeSession('v', t(1), [['Front Squat', 3, 100]]);
+      r = (await get('v', '/api/leaderboard/strength/front%20squat')).body;
+      assert.deepStrictEqual(r.entries.map(e => [e.username, e.weight]), [[U.v.username, 150]]);
+      assert.deepStrictEqual(r.unverified, []);
+
+      // a genuine big lift counts once another workout backs it: g logs 700 later
+      await makeSession('g', t(0.5), [['Overhead Press', 5, 700]]);
+      r = (await get('v', '/api/leaderboard/strength/overhead%20press')).body;
+      assert.deepStrictEqual(r.entries.map(e => [e.username, e.weight]), [[U.g.username, 1000], [U.f.username, 105]]);
+      assert.deepStrictEqual(r.unverified, []);
+    });
+
+    test('crown guard: 9999 / 2250 typo workouts with real 225s → the 225 holds', async () => {
+      await makeSession('f', t(20), [['Hack Squat', 5, 225]]);
+      await makeSession('f', t(19), [['Hack Squat', 5, 220]]);
+      await makeSession('f', t(18), [['Hack Squat', 5, 2250], ['Hack Squat', 5, 2250]]);
+      await makeSession('f', t(17), [['Hack Squat', 5, 9999]]);
+      const r = (await get('v', '/api/leaderboard/strength/hack%20squat')).body;
+      assert.deepStrictEqual(r.entries.map(e => [e.rank, e.username, e.weight]), [[1, U.f.username, 225]]);
+      assert.deepStrictEqual(r.unverified.map(e => e.weight), [9999, 2250]);
+      const holder = (await get('v', '/api/leaderboard/strength')).body.exercises.find(x => x.name === 'Hack Squat').holder;
+      assert.deepStrictEqual([holder.username, holder.weight], [U.f.username, 225]);
     });
   });
 });

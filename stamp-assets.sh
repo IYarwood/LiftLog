@@ -16,7 +16,7 @@
 # Adding a new <script>/<link>/import: give it "?v=dev" and list its file here.
 set -e
 cd "$(dirname "$0")"
-FILES="frontend/index.html frontend/login.html frontend/js/auth.js"
+FILES="frontend/index.html frontend/login.html frontend/js/auth.js frontend/js/editDraft.js"
 
 # Same file with every ?v=<value> blanked out, for comparing ignoring stamps.
 normalize() { sed -E 's/\?v=[A-Za-z0-9._-]+/?v=/g'; }

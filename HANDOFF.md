@@ -204,6 +204,21 @@ All `/api/sessions/*` routes now require `Authorization: Bearer <token>`.
 | POST | `/api/sessions/:id/exercises/:exId/sets` | `{ id }` | Add empty set. Position = last + 1 (server-assigned) |
 | PATCH | `/api/sessions/:id/exercises/:exId/sets/:setId` | `{ reps?, weight?, savedAt? }` | Update set fields. Omitted field = unchanged; `null` (or `''`) = clear. reps 0–9999 whole, weight 0–9999.99, else **400** |
 | DELETE | `/api/sessions/:id/exercises/:exId/sets/:setId` | — | Remove set |
+| DELETE | `/api/sessions/:id` | — | Delete a whole workout (owner only; a finished one only inside the edit window) |
+
+**Edit window.** The writes above (add/remove exercise, add/edit/remove set, delete workout)
+also work on a FINISHED workout, but only for its owner and only within
+`EDIT_WINDOW_DAYS` (7, `backend/src/db/editWindow.js`) of `finished_at`. After that they
+return **403** `{ error: "Editing closed: ...", code: "edit_window_closed" }`. In-progress
+workouts are never limited. Any write to a finished workout sets `sessions.edited_at`
+(shown as an "edited" tag in the detail view, the feed and on strength-board PRs).
+`PATCH /finish` on an already-finished workout is a 200 no-op (it no longer moves `finished_at`).
+Session shape gains `editedAt` (null if never edited) and `editableUntil`.
+The edit UI never autosaves set values: typed changes live in a local draft
+(`frontend/js/editDraft.js`) and only **done** sends them, one PATCH per changed set with only
+the changed fields, after validation. Leaving without done discards the draft (confirm if
+changed). Add/delete set, remove exercise and delete workout are immediate. A PATCH that would
+clear reps/weight (null) on a finished workout is a 400. Live workouts keep the autosave queue.
 
 ### Session shape returned by API
 ```json
@@ -318,8 +333,35 @@ rep range). Timezone defaults to `America/New_York`; set `LEADERBOARD_TZ=<IANA z
   sets with 1–12 reps and weight > 0, this period vs the 8 weeks before the period
   started. Points = round(% gain × 10), min 0, cap 50/week or 100/month per exercise.
   No baseline → 0 (sets the baseline). Gain > 25% → 0 (ignored as a likely typo).
+  All progress points together are capped at `PROGRESS_TOTAL_CAP` = 150/week, 400/month
+  (`progressRaw` / `progress` / `progressCapped` in the API; "capped" line in the UI).
 - **Consistency:** 10 pts per distinct local day with a finished workout that logged at
   least one set with reps ≥ 1; cap 4 days/week, 16 days/month.
 - **Strength:** heaviest weight (reps ≥ 1, weight > 0); tiebreak more reps, then earliest
   finished session. e1RM is shown only for ≤ 12 reps and never used for ranking.
   Bodyweight sets (weight 0) don't appear.
+  **Crown guard** (`CROWN_MAX_JUMP_PCT` = 50), judged per WORKOUT: take each user's best
+  lift per workout; a workout's best only ranks if a DIFFERENT workout's best is within 50%
+  of it, either way (so 2250 typed for all 3 sets of one workout can't back itself up, and a
+  bogus 9999 can't back up a bogus 2250). The user's ranked lift is their heaviest backed-up
+  workout best; the ones above it come back in `unverified` (greyed out in the UI). A user
+  with one workout of an exercise has no ranked entry yet; an exercise may have `holder: null`.
+
+---
+
+## Edited-workouts migration (one-time, on the VPS)
+
+Adds the nullable `sessions.edited_at` column. Idempotent, safe to re-run, and harmless
+to the old code, so apply it BEFORE deploying: the new code reads the column (the
+leaderboard strength query fails without it). Same statement as
+`backend/migrations/2026-11-23-session-edited-at.sql`, inlined because that file only
+arrives with the pull that `deploy.sh` does.
+
+```bash
+cd /var/work/LiftLog
+set -a; . backend/.env; set +a
+pg_dump "$DATABASE_URL" -Fc -f ~/liftlog-$(date +%F-%H%M).dump      # backup
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'ALTER TABLE sessions ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;'
+psql "$DATABASE_URL" -c '\d sessions'     # expect: edited_at | timestamp with time zone
+./deploy.sh                                 # pull, stamp, npm install, pm2 restart liftlog
+```

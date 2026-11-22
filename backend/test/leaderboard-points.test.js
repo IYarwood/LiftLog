@@ -83,3 +83,80 @@ test('buildBoard: totals, ordering, ties, viewer flag, no user ids leaked', () =
   assert.deepStrictEqual(zed.exercises.map(x => [x.name, x.points, x.status]), [['Squat', 25, 'scored'], ['Bench', 0, 'new']]);
   assert.deepStrictEqual(zed.consistency, { days: 1, countedDays: 1, points: 10 });
 });
+
+test("crown guard: a workout's best needs ANOTHER workout within 50% (either way)", () => {
+  assert.strictEqual(P.CROWN_MAX_JUMP_PCT, 50);
+  assert.strictEqual(P.isVerifiedLift(225, []), false);           // only one workout
+  assert.strictEqual(P.isVerifiedLift(2250, [225]), false);       // typo
+  assert.strictEqual(P.isVerifiedLift(150, [100]), true);         // exactly +50%
+  assert.strictEqual(P.isVerifiedLift(150.5, [100]), false);      // just over
+  assert.strictEqual(P.isVerifiedLift(2250, [9999, 225]), false); // a heavier outlier doesn't vouch
+  assert.strictEqual(P.isVerifiedLift(225, [9999, 2250, 220]), true);
+  assert.strictEqual(P.withinCrownJump(100, 150), true);
+  assert.strictEqual(P.withinCrownJump(150, 100), true);
+});
+
+// One row per (user, workout): that workout's best lift.
+const W = (userId, sessionId, weight, reps, date) =>
+  ({ userId, username: 'u' + userId, sessionId, weight, reps, date });
+
+test('crown guard: repeated typo sets in ONE workout stay unverified', () => {
+  // 2250×5 typed for all 3 sets collapses to one per-workout best: nothing else backs it
+  const { ranked, unverified } = P.strengthStandings([W(1, 's1', 2250, 5, '2026-01-02')]);
+  assert.deepStrictEqual(ranked, []);
+  assert.deepStrictEqual(unverified.map(r => [r.userId, r.weight]), [[1, 2250]]);
+});
+
+test('crown guard: two workouts agreeing → verified (and a single-workout user is not)', () => {
+  const { ranked, unverified } = P.strengthStandings([
+    W(1, 'a', 300, 3, '2026-01-01'), W(1, 'b', 290, 3, '2026-01-08'),   // backed
+    W(2, 'c', 400, 1, '2026-01-02'),                                    // one workout only
+  ]);
+  assert.deepStrictEqual(ranked.map(r => [r.rank, r.userId, r.weight]), [[1, 1, 300]]);
+  assert.deepStrictEqual(unverified.map(r => [r.userId, r.weight]), [[2, 400]]);
+});
+
+test('crown guard: 9999 / 2250 typos with real 225s → the 225 holds', () => {
+  const { ranked, unverified } = P.strengthStandings([
+    W(1, 'a', 9999, 5, '2026-01-03'), W(1, 'b', 2250, 5, '2026-01-02'),
+    W(1, 'c', 225, 5, '2026-01-01'), W(1, 'd', 225, 3, '2026-01-04'),
+    W(2, 'e', 230, 5, '2026-01-01'), W(2, 'f', 160, 5, '2026-01-01'),
+  ]);
+  assert.deepStrictEqual(ranked.map(r => [r.rank, r.userId, r.weight, r.reps, r.sessionId]),
+    [[1, 2, 230, 5, 'e'], [2, 1, 225, 5, 'c']]);
+  assert.deepStrictEqual(unverified.map(r => [r.userId, r.weight]), [[1, 9999], [1, 2250]]);
+});
+
+test('crown guard: ties share a rank; earlier wins on equal weight × reps', () => {
+  const { ranked } = P.strengthStandings([
+    W(1, 'a', 225, 5, '2026-01-01'), W(1, 'b', 220, 5, '2026-01-05'),
+    W(2, 'c', 225, 5, '2026-01-01'), W(2, 'd', 200, 5, '2026-01-05'),   // exact tie with user 1
+    W(3, 'e', 225, 5, '2026-01-02'), W(3, 'f', 225, 5, '2026-01-03'),   // same lift, done later
+    W(4, 'g', 225, 6, '2026-01-09'), W(4, 'h', 200, 6, '2026-01-09'),   // more reps wins
+  ]);
+  assert.deepStrictEqual(ranked.map(r => [r.rank, r.userId]), [[1, 4], [2, 1], [2, 2], [4, 3]]);
+});
+
+test('total progress cap: 150/week, 400/month; consistency is separate', () => {
+  assert.deepStrictEqual(P.PROGRESS_TOTAL_CAP, { week: 150, month: 400 });
+  const users = [{ id: 1, username: 'a' }, { id: 2, username: 'b' }];
+  // user 1: four exercises at +10% → 4 × capped 50 = 200 raw (week) / 4 × 100 = 400 (month)
+  const lifts = ['A', 'B', 'C', 'D'].map(name => ({ userId: 1, name, baseline: 100, best: 110 }))
+    .concat([{ userId: 2, name: 'A', baseline: 100, best: 103 }]);          // 30
+  const days = new Map([[1, 6], [2, 1]]);
+  const wk = P.buildBoard({ users, lifts, days, period: 'week', viewerId: 1 });
+  const a = wk.find(e => e.username === 'a');
+  assert.deepStrictEqual([a.progressRaw, a.progress, a.progressCapped, a.consistency.points, a.total],
+    [200, 150, true, 40, 190]);
+  const b = wk.find(e => e.username === 'b');
+  assert.deepStrictEqual([b.progressRaw, b.progress, b.progressCapped, b.total], [30, 30, false, 40]);
+
+  // month: 400 raw is exactly the cap → not marked capped
+  const mo = P.buildBoard({ users, lifts, days, period: 'month', viewerId: 1 });
+  const am = mo.find(e => e.username === 'a');
+  assert.deepStrictEqual([am.progressRaw, am.progress, am.progressCapped], [400, 400, false]);
+  // five of them → 500 raw → 400
+  const five = lifts.concat([{ userId: 1, name: 'E', baseline: 100, best: 110 }]);
+  const am5 = P.buildBoard({ users, lifts: five, days, period: 'month', viewerId: 1 }).find(e => e.username === 'a');
+  assert.deepStrictEqual([am5.progressRaw, am5.progress, am5.progressCapped, am5.total], [500, 400, true, 460]);
+});

@@ -3,20 +3,47 @@ const pool = require('../db/pool');
 const { parseExerciseName } = require('../validation/exerciseName');
 const { toWeight } = require('../db/hydrate');
 const { parseSetFields } = require('../validation/setFields');
+const { EDIT_WINDOW_DAYS, EDIT_CLOSED_MSG, editableUntil } = require('../db/editWindow');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// True if exercise `exId` exists, belongs to session `sessionId`, AND that
-// session belongs to `userId`. Verifies the full ownership chain.
+// Edit gate columns for a session row aliased `s`: is it finished, and if so,
+// has its edit window closed? Compared against the DB clock. $N = window days.
+const EDIT_STATE_SQL = (n) =>
+  `s.finished_at IS NOT NULL AS finished,
+   (s.finished_at IS NOT NULL AND s.finished_at < NOW() - make_interval(days => $${n})) AS closed`;
+
+// Exercise `exId` in session `sessionId` owned by `userId`, with the session's
+// edit state: { finished, closed }, or null if the chain doesn't match.
 async function ownsSessionExercise(sessionId, exId, userId) {
   const r = await pool.query(
-    `SELECT 1
+    `SELECT ${EDIT_STATE_SQL(4)}
        FROM session_exercises se
        JOIN sessions s ON s.id = se.session_id
       WHERE se.id = $1 AND se.session_id = $2 AND s.user_id = $3`,
-    [exId, sessionId, userId]
+    [exId, sessionId, userId, EDIT_WINDOW_DAYS]
   );
-  return r.rows.length > 0;
+  return r.rows[0] || null;
+}
+
+// Every write to a session's exercises/sets goes through this: 404 unless the
+// caller owns it, 403 once a FINISHED workout is past its edit window. In-progress
+// workouts are never limited. Returns the edit state, or null if it already
+// sent the error response.
+async function editGate(res, sessionId, exId, userId) {
+  const st = await ownsSessionExercise(sessionId, exId, userId);
+  if (!st) { res.status(404).json({ error: 'Not found' }); return null; }
+  if (st.closed) { res.status(403).json({ error: EDIT_CLOSED_MSG, code: 'edit_window_closed' }); return null; }
+  return st;
+}
+
+// Stamp a FINISHED session as edited (no-op for an in-progress one).
+async function markEdited(sessionId, st) {
+  if (!st.finished) return;
+  await pool.query(
+    'UPDATE sessions SET edited_at = NOW() WHERE id = $1 AND finished_at IS NOT NULL',
+    [sessionId]
+  );
 }
 
 // Build the full session object (with exercises and sets) from an
@@ -49,6 +76,8 @@ async function hydrateSession(sess) {
     id: sess.id,
     startedAt: sess.started_at,
     finishedAt: sess.finished_at,
+    editedAt: sess.edited_at || null,
+    editableUntil: editableUntil(sess.finished_at),
     exercises,
   };
 }
@@ -127,18 +156,42 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PATCH /api/sessions/:id/finish — mark this user's session as finished
+// PATCH /api/sessions/:id/finish — mark this user's session as finished.
+// Finishing an already-finished session is a no-op 200 (a retried request): it
+// must NOT move finished_at, or an old workout could be pulled into this week's
+// leaderboard and get a fresh edit window.
 router.patch('/:id/finish', async (req, res) => {
   try {
     const result = await pool.query(
-      'UPDATE sessions SET finished_at = NOW() WHERE id = $1 AND user_id = $2',
+      'UPDATE sessions SET finished_at = NOW() WHERE id = $1 AND user_id = $2 AND finished_at IS NULL',
       [req.params.id, req.userId]
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    if (result.rowCount === 0) {
+      const exists = await pool.query('SELECT 1 FROM sessions WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
+      if (!exists.rows.length) return res.status(404).json({ error: 'Not found' });
+    }
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to finish session' });
+  }
+});
+
+// DELETE /api/sessions/:id — delete one of this user's workouts (with its
+// exercises and sets). A finished workout only within its edit window.
+router.delete('/:id', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT ${EDIT_STATE_SQL(3)} FROM sessions s WHERE s.id = $1 AND s.user_id = $2`,
+      [req.params.id, req.userId, EDIT_WINDOW_DAYS]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
+    if (r.rows[0].closed) return res.status(403).json({ error: EDIT_CLOSED_MSG, code: 'edit_window_closed' });
+    await pool.query('DELETE FROM sessions WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete workout' });
   }
 });
 
@@ -166,12 +219,16 @@ router.post('/:id/exercises', async (req, res) => {
     client = await pool.connect();
     await client.query('BEGIN');
     const own = await client.query(
-      'SELECT 1 FROM sessions WHERE id = $1 AND user_id = $2 FOR UPDATE',
-      [req.params.id, req.userId]
+      `SELECT ${EDIT_STATE_SQL(3)} FROM sessions s WHERE s.id = $1 AND s.user_id = $2 FOR UPDATE`,
+      [req.params.id, req.userId, EDIT_WINDOW_DAYS]
     );
     if (!own.rows.length) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Not found' });
+    }
+    if (own.rows[0].closed) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: EDIT_CLOSED_MSG, code: 'edit_window_closed' });
     }
     const dup = await client.query(
       `SELECT id, session_id, name FROM session_exercises
@@ -198,6 +255,9 @@ router.post('/:id/exercises', async (req, res) => {
          FROM session_exercises WHERE session_id = $2`,
       [id, req.params.id, name]
     );
+    if (own.rows[0].finished) {
+      await client.query('UPDATE sessions SET edited_at = NOW() WHERE id = $1', [req.params.id]);
+    }
     await client.query('COMMIT');
     res.json({ ok: true, id });
   } catch (err) {
@@ -216,13 +276,13 @@ router.post('/:id/exercises', async (req, res) => {
 // DELETE /api/sessions/:id/exercises/:exId — remove exercise from this user's session
 router.delete('/:id/exercises/:exId', async (req, res) => {
   try {
-    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
-      return res.status(404).json({ error: 'Not found' });
-    }
+    const st = await editGate(res, req.params.id, req.params.exId, req.userId);
+    if (!st) return;
     await pool.query(
       'DELETE FROM session_exercises WHERE id = $1 AND session_id = $2',
       [req.params.exId, req.params.id]
     );
+    await markEdited(req.params.id, st);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -239,15 +299,15 @@ router.post('/:id/exercises/:exId/sets', async (req, res) => {
   const { id } = req.body;
   if (!id) return res.status(400).json({ error: 'id required' });
   try {
-    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
-      return res.status(404).json({ error: 'Not found' });
-    }
+    const st = await editGate(res, req.params.id, req.params.exId, req.userId);
+    if (!st) return;
     await pool.query(
       `INSERT INTO sets (id, session_exercise_id, position)
        SELECT $1, $2, COALESCE(MAX(position) + 1, 0)
          FROM sets WHERE session_exercise_id = $2`,
       [id, req.params.exId]
     );
+    await markEdited(req.params.id, st);
     res.json({ ok: true, id });
   } catch (err) {
     console.error(err);
@@ -267,8 +327,13 @@ router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
   if (error) return res.status(400).json({ error });
   const has = (k) => Object.prototype.hasOwnProperty.call(fields, k);
   try {
-    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
-      return res.status(404).json({ error: 'Not found' });
+    const st = await editGate(res, req.params.id, req.params.exId, req.userId);
+    if (!st) return;
+    // A FINISHED workout's stored values are never cleared by an edit (only a
+    // live workout clears a field with null while you type): fix the value or
+    // delete the set instead. Keeps a stray null from wiping a logged lift.
+    if (st.finished && ((has('reps') && fields.reps === null) || (has('weight') && fields.weight === null))) {
+      return res.status(400).json({ error: "a finished workout's set can't be cleared — enter a value or delete the set" });
     }
     // $1/$3 say whether reps/weight were sent; if so, $2/$4 (possibly null)
     // replace the stored value.
@@ -283,6 +348,7 @@ router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
        has('savedAt') ? fields.savedAt : null,
        req.params.setId, req.params.exId]
     );
+    await markEdited(req.params.id, st);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -293,13 +359,13 @@ router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
 // DELETE /api/sessions/:id/exercises/:exId/sets/:setId — remove a set
 router.delete('/:id/exercises/:exId/sets/:setId', async (req, res) => {
   try {
-    if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
-      return res.status(404).json({ error: 'Not found' });
-    }
+    const st = await editGate(res, req.params.id, req.params.exId, req.userId);
+    if (!st) return;
     await pool.query(
       'DELETE FROM sets WHERE id = $1 AND session_exercise_id = $2',
       [req.params.setId, req.params.exId]
     );
+    await markEdited(req.params.id, st);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);

@@ -124,6 +124,8 @@ async function pointsBoard(viewerId, period, { offset = 0, now = new Date(), tz 
     hasFriends: usersRes.rows.length > 1,
     rules: {
       progressCap: P.PROGRESS_CAP[period],
+      progressTotalCap: P.PROGRESS_TOTAL_CAP[period],
+      crownMaxJumpPct: P.CROWN_MAX_JUMP_PCT,
       daysCap: P.DAYS_CAP[period],
       pointsPerDay: P.POINTS_PER_DAY,
       pointsPerPercent: P.POINTS_PER_PERCENT,
@@ -135,9 +137,9 @@ async function pointsBoard(viewerId, period, { offset = 0, now = new Date(), tz 
   };
 }
 
-// Each board member's all-time best set per exercise: heaviest weight for at
-// least 1 rep; ties → more reps at that weight → done first. Rows come back
-// sorted per exercise in ranking order. `key` (lowercased name) narrows it to
+// Each board member's best lift PER WORKOUT for each exercise (all-time,
+// finished workouts, weight > 0, reps >= 1): heaviest → more reps. The crown
+// guard compares these across workouts. `key` (lowercased name) narrows it to
 // one exercise.
 async function strengthRows(viewerId, key) {
   const params = [viewerId];
@@ -145,43 +147,57 @@ async function strengthRows(viewerId, key) {
   if (key !== undefined) { params.push(key); keySql = 'AND lower(se.name) = $2'; }
   const r = await pool.query(
     `WITH ${BOARD_CTE},
-     best AS (
-       SELECT DISTINCT ON (lower(se.name), s.user_id)
-              lower(se.name) AS key, se.name, s.user_id, st.weight, st.reps, s.finished_at
+     per_session AS (
+       SELECT DISTINCT ON (lower(se.name), s.id)
+              lower(se.name) AS key, se.name, s.user_id, s.id AS session_id,
+              st.weight, st.reps, s.finished_at, (s.edited_at IS NOT NULL) AS edited
          FROM sessions s
          JOIN session_exercises se ON se.session_id = s.id
          JOIN sets st ON st.session_exercise_id = se.id
         WHERE s.user_id IN (SELECT id FROM board)
           AND s.finished_at IS NOT NULL
           AND st.weight > 0 AND st.reps >= 1 ${keySql}
-        ORDER BY lower(se.name), s.user_id, st.weight DESC, st.reps DESC, s.finished_at ASC
+        ORDER BY lower(se.name), s.id, st.weight DESC, st.reps DESC, st.id ASC
      )
-     SELECT b.key, COALESCE(ex.name, b.name) AS name, u.id AS user_id, u.username,
-            b.weight, b.reps, b.finished_at
-       FROM best b
-       JOIN users u ON u.id = b.user_id
-       LEFT JOIN exercises ex ON lower(ex.name) = b.key
-      ORDER BY b.key, b.weight DESC, b.reps DESC, b.finished_at ASC, u.username ASC`,
+     SELECT p.key, COALESCE(ex.name, p.name) AS name, u.id AS user_id, u.username,
+            p.session_id, p.weight, p.reps, p.finished_at, p.edited
+       FROM per_session p
+       JOIN users u ON u.id = p.user_id
+       LEFT JOIN exercises ex ON lower(ex.name) = p.key
+      ORDER BY p.key, p.user_id, p.weight DESC, p.reps DESC, p.finished_at ASC`,
     params
   );
-  return r.rows;
+  return r.rows.map(row => ({
+    key: row.key, name: row.name, userId: row.user_id, username: row.username,
+    sessionId: row.session_id, weight: toWeight(row.weight),
+    reps: row.reps, date: row.finished_at, edited: row.edited === true,
+  }));
 }
 
-function strengthEntry(row, viewerId) {
-  const weight = toWeight(row.weight);
+// rows (from strengthRows) grouped per exercise key, in first-seen order.
+function groupByKey(rows) {
+  const m = new Map();
+  for (const r of rows) {
+    if (!m.has(r.key)) m.set(r.key, { key: r.key, name: r.name, rows: [] });
+    m.get(r.key).rows.push(r);
+  }
+  return [...m.values()];
+}
+
+function strengthEntry(l, viewerId, extra = {}) {
   return {
-    username: row.username,
-    isYou: row.user_id === viewerId,
-    weight,
-    reps: row.reps,
+    ...(l.rank !== undefined ? { rank: l.rank } : {}),
+    username: l.username,
+    isYou: l.userId === viewerId,
+    weight: l.weight,
+    reps: l.reps,
     // e1RM is shown as extra info only; it's meaningless past 12 reps.
-    e1rm: row.reps <= P.E1RM_MAX_REPS ? P.round1(P.e1rm(weight, row.reps)) : null,
-    date: row.finished_at,
+    e1rm: l.reps <= P.E1RM_MAX_REPS ? P.round1(P.e1rm(l.weight, l.reps)) : null,
+    date: l.date,
+    edited: l.edited,   // PR comes from a workout edited after finishing
+    ...extra,
   };
 }
-
-const sameLift = (a, b) =>
-  a.weight === b.weight && a.reps === b.reps && +new Date(a.date) === +new Date(b.date);
 
 async function hasFriends(viewerId) {
   const r = await pool.query(
@@ -208,20 +224,23 @@ for (const [path, period] of [['/weekly', 'week'], ['/monthly', 'month']]) {
 }
 
 // GET /api/leaderboard/strength — one row per exercise anyone on the board has
-// done, with its current holder.
+// done, with its current holder (null if every top lift is still unverified).
 router.get('/strength', async (req, res) => {
   try {
-    const rows = await strengthRows(req.userId);
-    const out = [];
-    for (const row of rows) {
-      const last = out[out.length - 1];
-      if (last && last.key === row.key) { last.people++; continue; }
-      out.push({ key: row.key, name: row.name, holder: strengthEntry(row, req.userId), people: 1 });
-    }
+    const out = groupByKey(await strengthRows(req.userId)).map(g => {
+      const { ranked, unverified } = P.strengthStandings(g.rows);
+      return {
+        name: g.name,
+        holder: ranked.length ? strengthEntry(ranked[0], req.userId) : null,
+        people: new Set(g.rows.map(r => r.userId)).size,
+        unverified: unverified.length,
+      };
+    });
     out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     res.json({
       hasFriends: await hasFriends(req.userId),
-      exercises: out.map(({ key, ...rest }) => rest),
+      crownMaxJumpPct: P.CROWN_MAX_JUMP_PCT,
+      exercises: out,
     });
   } catch (err) {
     console.error(err);
@@ -229,16 +248,23 @@ router.get('/strength', async (req, res) => {
   }
 });
 
-// GET /api/leaderboard/strength/:exercise — everyone's best for one exercise
-// (name matched ignoring case). 404 if nobody on the board has done it.
+// GET /api/leaderboard/strength/:exercise — everyone's best verified lift for
+// one exercise, ranked, plus top lifts held back by the crown guard
+// (`unverified`, not ranked). Name matched ignoring case; 404 if nobody on the
+// board has done it.
 router.get('/strength/:exercise', async (req, res) => {
   const key = String(req.params.exercise || '').trim().toLowerCase();
   if (!key || key.length > 200) return res.status(400).json({ error: 'exercise required' });
   try {
     const rows = await strengthRows(req.userId, key);
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
-    const entries = P.assignRanks(rows.map(r => strengthEntry(r, req.userId)), sameLift);
-    res.json({ name: rows[0].name, entries });
+    const { ranked, unverified } = P.strengthStandings(rows);
+    res.json({
+      name: rows[0].name,
+      crownMaxJumpPct: P.CROWN_MAX_JUMP_PCT,
+      entries: ranked.map(l => strengthEntry(l, req.userId)),
+      unverified: unverified.map(l => strengthEntry(l, req.userId, { unverified: true })),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load leaderboard' });

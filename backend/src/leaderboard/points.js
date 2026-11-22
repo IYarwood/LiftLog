@@ -17,6 +17,9 @@ const BASELINE_WEEKS = 8;
 // Progress points = round(% improvement × POINTS_PER_PERCENT), capped per exercise.
 const POINTS_PER_PERCENT = 10;
 const PROGRESS_CAP = { week: 50, month: 100 };
+// ...and all of a user's progress points together are capped per period.
+// Consistency points are separate (they have their own DAYS_CAP).
+const PROGRESS_TOTAL_CAP = { week: 150, month: 400 };
 
 // An improvement over this many percent in one period is ignored (0 points):
 // most likely a typo (2250 for 225) or cheating.
@@ -27,6 +30,13 @@ const POINTS_PER_DAY = 10;
 const DAYS_CAP = { week: 4, month: 16 };
 
 const PERIODS = ['week', 'month'];
+
+// Strength crown guard, judged per WORKOUT (people type the same weight for
+// every set, so a typo repeated over 3 sets must not vouch for itself): a
+// workout's best lift only counts if a DIFFERENT workout's best for that
+// exercise is within this many percent of it (either way). A typo like 2250
+// for 225 never holds the crown; a real PR counts once another workout backs it.
+const CROWN_MAX_JUMP_PCT = 50;
 
 // Epley estimated 1RM.
 function e1rm(weight, reps) {
@@ -64,6 +74,58 @@ function assignRanks(rows, sameAs) {
   return rows;
 }
 
+// Are two weights within CROWN_MAX_JUMP_PCT of each other (the heavier at most
+// that much above the lighter)? Exactly +50% still counts.
+function withinCrownJump(a, b) {
+  const hi = Math.max(a, b), lo = Math.min(a, b);
+  return hi <= lo * (1 + CROWN_MAX_JUMP_PCT / 100) + 1e-9;
+}
+
+// Is one workout's best lift verified? `weight` is that workout's best weight;
+// `otherWeights` are the user's per-workout bests from their OTHER workouts of
+// the exercise. Verified iff one of them is within the jump margin. A heavier
+// outlier doesn't vouch for a lift (9999 can't back up 2250).
+function isVerifiedLift(weight, otherWeights) {
+  return otherWeights.some(w => withinCrownJump(weight, w));
+}
+
+// Strength order: heavier → more reps at that weight → done first → name.
+function compareLifts(a, b) {
+  return b.weight - a.weight || b.reps - a.reps ||
+    new Date(a.date) - new Date(b.date) || a.username.localeCompare(b.username);
+}
+
+// rows: each user's best lift PER WORKOUT for ONE exercise, as
+//   { userId, username, sessionId, weight, reps, date, ... }.
+// For each user, their ranked lift is the heaviest per-workout best that another
+// of their workouts backs up (see isVerifiedLift). Returns { ranked, unverified }:
+//   ranked     = one lift per user with a verified lift, in crown order, with ranks
+//   unverified = per-workout bests held back: every one above the user's ranked
+//                lift, or just their top one if nothing of theirs is verified yet.
+function strengthStandings(rows) {
+  const byUser = new Map();
+  for (const r of rows) {
+    if (!byUser.has(r.userId)) byUser.set(r.userId, []);
+    byUser.get(r.userId).push(r);
+  }
+  const ranked = [], unverified = [];
+  for (const lifts of byUser.values()) {
+    lifts.sort(compareLifts);
+    const idx = lifts.findIndex((l, i) =>
+      isVerifiedLift(l.weight, lifts.filter((_, j) => j !== i).map(o => o.weight)));
+    if (idx >= 0) {
+      ranked.push(lifts[idx]);
+      unverified.push(...lifts.slice(0, idx));
+    } else {
+      unverified.push(lifts[0]);
+    }
+  }
+  ranked.sort(compareLifts);
+  unverified.sort(compareLifts);
+  const same = (a, b) => a.weight === b.weight && a.reps === b.reps && +new Date(a.date) === +new Date(b.date);
+  return { ranked: assignRanks(ranked, same), unverified };
+}
+
 const round1 = (n) => (n === null || n === undefined ? null : Math.round(n * 10) / 10);
 
 // Build the board for one period.
@@ -96,6 +158,10 @@ function buildBoard({ users, lifts, days, period, viewerId }) {
   }
   const entries = [...byUser.values()];
   for (const e of entries) {
+    // progressRaw = sum over exercises; progress = after the per-period total cap
+    e.progressRaw = e.progress;
+    e.progress = Math.min(e.progressRaw, PROGRESS_TOTAL_CAP[period]);
+    e.progressCapped = e.progressRaw > e.progress;
     e.consistency = consistencyPoints(days.get(e.id) || 0, period);
     e.total = e.progress + e.consistency.points;
     e.exercises.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
@@ -107,6 +173,7 @@ function buildBoard({ users, lifts, days, period, viewerId }) {
 
 module.exports = {
   TIMEZONE, E1RM_MIN_REPS, E1RM_MAX_REPS, BASELINE_WEEKS, POINTS_PER_PERCENT,
-  PROGRESS_CAP, MAX_PLAUSIBLE_GAIN_PCT, POINTS_PER_DAY, DAYS_CAP, PERIODS,
+  PROGRESS_CAP, PROGRESS_TOTAL_CAP, MAX_PLAUSIBLE_GAIN_PCT, POINTS_PER_DAY, DAYS_CAP, PERIODS, CROWN_MAX_JUMP_PCT,
   e1rm, progressPoints, consistencyPoints, assignRanks, buildBoard, round1,
+  withinCrownJump, isVerifiedLift, strengthStandings,
 };

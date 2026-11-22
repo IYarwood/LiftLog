@@ -259,6 +259,21 @@
   .form-msg { font-size: 11px; color: var(--text-d); min-height: 16px; margin: -6px 0 8px; }
   .form-msg.err { color: var(--danger); }
 
+  /* Editing a finished workout */
+  .edited-tag {
+    display: inline-block; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--warn);
+    border: 1px solid rgba(240,160,48,0.35); border-radius: 4px; padding: 0 5px; margin-left: 6px;
+    line-height: 15px; vertical-align: middle; white-space: nowrap;
+  }
+  .edit-closed { font-size: 10px; color: var(--text-d); letter-spacing: 0.5px; padding: 14px 0 0; white-space: nowrap; }
+  .edit-set-row { display: grid; grid-template-columns: 20px 1fr 1fr 44px; gap: 4px; margin-bottom: 6px; align-items: center; }
+  .btn-danger {
+    width: 100%; background: none; border: 1px solid rgba(255,68,85,0.4); border-radius: 10px;
+    padding: 14px; min-height: 48px; font-family: var(--disp); font-size: 18px; letter-spacing: 2px;
+    color: var(--danger); margin: 18px 0 10px;
+  }
+  .btn-danger:active { background: rgba(255,68,85,0.1); }
+
   /* Five tabs at 320px are 64px wide: keep the friends badge inside its tab. */
   @media (max-width: 360px) {
     .tab-badge { left: auto; right: 3px; top: 4px; }
@@ -298,6 +313,8 @@
   .lb-line { display: flex; align-items: flex-start; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
   .lb-line:last-child { border-bottom: none; }
   .lb-line.you { color: var(--accent-t); }
+  .lb-line.unverified { opacity: 0.45; }
+  .lb-unv { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-d); border: 1px solid var(--border-h); border-radius: 4px; padding: 0 5px; margin-left: 6px; white-space: nowrap; }
   .lb-line .main { flex: 1; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
   .lb-line .sub { display: block; font-size: 10px; color: var(--text-d); margin-top: 2px; }
   .lb-line .val { flex-shrink: 0; font-family: var(--disp); font-size: 17px; letter-spacing: 1px; text-align: right; }
@@ -358,9 +375,13 @@
   <!-- SESSION DETAIL -->
   <div class="view" id="view-session-detail">
     <div class="who" id="detail-who" style="display:none"></div>
-    <div class="disp-lg" id="detail-title"></div>
-    <div class="text-d" id="detail-sub" style="margin-bottom:20px;"></div>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+      <div class="disp-lg flex-fill" id="detail-title"></div>
+      <div class="no-shrink" id="detail-actions"></div>
+    </div>
+    <div class="text-d" style="margin-bottom:20px;"><span id="detail-sub"></span><span id="detail-edited"></span></div>
     <div id="detail-exercises"></div>
+    <div id="detail-footer"></div>
   </div>
 
   <!-- FEED (friends' finished workouts) -->
@@ -448,6 +469,7 @@
 import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
 import { createSaveQueue } from './js/saveQueue.js?v=dev';
 import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue } from './js/setFields.js?v=dev';
+import { makeDraft, draftChanges, hasDraftChanges } from './js/editDraft.js?v=dev';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let exercises = [];   // string[]
@@ -457,6 +479,8 @@ let currentView = 'home';
 let detailSession = null;
 let detailOwner = null;      // null = my session; username = a friend's (read-only)
 let detailReturn = 'history'; // view to go back to from session detail
+let detailEditing = false;    // my finished workout is open in edit mode
+let editDraft = null;         // local copy being edited; sent only on "done"
 let manageReturn = 'home';    // view to go back to from the exercises page
 let manageEditing = null;     // library name currently being renamed, or null
 let manageDraft = '';         // text in the rename input (survives re-renders)
@@ -515,6 +539,12 @@ function jsArg(v) { return esc(JSON.stringify(String(v ?? ''))); }
 function showView(name, opts = {}) {
   // Leaving the exercises page: drop its status/error and any half-done rename.
   if (currentView === 'manage' && name !== 'manage') { manageMsg(''); manageEditing = null; }
+  if (currentView === 'session-detail' && name !== 'session-detail' && detailEditing) {
+    // Typed values are only saved by "done": leaving discards them.
+    if (editDraft && hasDraftChanges(detailSession, editDraft) &&
+        !confirm('Discard your unsaved changes to this workout?')) return;
+    stopEditing();
+  }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   el('view-' + name).classList.add('active');
   currentView = name;
@@ -904,7 +934,7 @@ function renderHistory() {
     <div class="card clickable" onclick="openDetail(${jsArg(s.id)})">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
         <div class="flex-fill">
-          <div class="disp-sm">${fmtDate(s.startedAt)}</div>
+          <div class="disp-sm">${fmtDate(s.startedAt)}${s.editedAt ? editedTag(s.editedAt) : ''}</div>
           <div class="text-d">${fmtTime(s.startedAt)}${s.finishedAt ? ' → ' + fmtTime(s.finishedAt) : ''}</div>
           <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${esc(e.name)}</span>`).join('')}</div>
         </div>
@@ -919,6 +949,7 @@ function openDetail(sessionId) {
   detailSession = sessions.find(s => s.id === sessionId);
   if (!detailSession) return;
   detailOwner = null;
+  stopEditing();
   detailReturn = currentView === 'home' ? 'home' : 'history';
   showView('session-detail');
 }
@@ -926,6 +957,7 @@ function openDetail(sessionId) {
 function openFriendDetail(sess, returnTo) {
   detailSession = sess;
   detailOwner = sess.username;
+  stopEditing();
   detailReturn = returnTo;
   showView('session-detail');
 }
@@ -935,6 +967,18 @@ function renderDetail() {
   el('detail-who').textContent = detailOwner ? '@' + detailOwner : '';
   el('detail-title').textContent = fmtDate(detailSession.startedAt);
   el('detail-sub').textContent = `${fmtTime(detailSession.startedAt)}${detailSession.finishedAt ? ' – ' + fmtTime(detailSession.finishedAt) : ''} · ${detailSession.exercises.reduce((a,e)=>a+e.sets.length,0)} total sets`;
+  el('detail-edited').innerHTML = detailSession.editedAt ? editedTag(detailSession.editedAt) : '';
+
+  // Edit button only on MY finished workouts, and only inside the edit window.
+  const mine = !detailOwner && !!detailSession.finishedAt;
+  if (mine && detailEditing && !canEditSession(detailSession)) stopEditing();
+  el('detail-actions').innerHTML = !mine ? ''
+    : detailEditing ? `<button class="mini-btn accent" onclick="doneEditing()">done</button>`
+    : canEditSession(detailSession) ? `<button class="mini-btn" onclick="startEditing()">edit</button>`
+    : `<div class="edit-closed">editing closed</div>`;
+  el('detail-footer').innerHTML = detailEditing
+    ? `<button class="btn-danger" onclick="deleteWorkout()">DELETE WORKOUT</button>` : '';
+  if (detailEditing && editDraft) { renderDetailEdit(); return; }
 
   el('detail-exercises').innerHTML = (detailSession.exercises||[]).map(ex => {
     // All-time stats come from MY history, so only show them on my own sessions
@@ -976,6 +1020,210 @@ function renderDetail() {
 }
 
 
+// ─── Editing a finished workout (mine, within the edit window) ───────────────
+// The server enforces the window (403 after it) and ownership (404); this is
+// only so the UI doesn't offer what the server will refuse.
+const EDIT_WINDOW_DAYS = 7;   // same as backend/src/db/editWindow.js (fallback only)
+function editableUntilOf(sess) {
+  if (sess.editableUntil) return new Date(sess.editableUntil);
+  return sess.finishedAt ? new Date(new Date(sess.finishedAt).getTime() + EDIT_WINDOW_DAYS * 864e5) : null;
+}
+function canEditSession(sess) {
+  const until = sess && sess.finishedAt ? editableUntilOf(sess) : null;
+  return !!until && Date.now() < until.getTime();
+}
+function editedTag(iso) {
+  return `<span class="edited-tag"${iso ? ` title="edited ${esc(fmtDate(iso))}"` : ""}>edited</span>`;
+}
+
+// Field edits are NOT autosaved: they live in editDraft (js/editDraft.js) until
+// "done". Adding/deleting a set, removing an exercise and deleting the workout
+// are explicit actions and go to the server immediately.
+function editRejected(err) {
+  if (err && err.status === 403) {
+    alert((err.body && err.body.error) || 'Editing closed for this workout.');
+    stopEditing();
+    refreshDetailSession();
+  } else if (err && err.status === 400) {
+    alert(`Not saved: ${(err.body && err.body.error) || 'invalid value'}.`);
+  } else if (err && err.status === 404) {
+    refreshDetailSession();   // something was removed elsewhere
+  } else {
+    alert('Could not save the change — check your connection and try again.');
+  }
+}
+// Run one immediate edit call; returns true on success.
+async function editCall(fn) {
+  try { await fn(); markDetailEdited(); return true; }
+  catch (err) { editRejected(err); return false; }
+}
+function markDetailEdited() {
+  if (detailSession && !detailSession.editedAt) {
+    detailSession.editedAt = new Date().toISOString();
+    el('detail-edited').innerHTML = editedTag(detailSession.editedAt);
+  }
+}
+// Replace my local copy of one of MY sessions (default: the open one) with the
+// server's.
+async function refreshDetailSession(id = (detailSession && !detailOwner) ? detailSession.id : null) {
+  if (!id) return;
+  const isOpen = () => detailSession && !detailOwner && detailSession.id === id;
+  try {
+    const fresh = await GET(`/sessions/${id}`);
+    sessions = sessions.map(x => x.id === id ? fresh : x);
+    if (isOpen()) detailSession = fresh;
+  } catch (err) {
+    if (err.status === 404) {
+      sessions = sessions.filter(x => x.id !== id);
+      if (currentView === 'session-detail' && isOpen()) showView('history');
+      return;
+    }
+  }
+  if (currentView === 'session-detail' && isOpen()) renderDetail();
+  if (currentView === 'history') renderHistory();
+}
+
+function startEditing() {
+  if (!detailSession || detailOwner || !canEditSession(detailSession)) return;
+  editDraft = makeDraft(detailSession);
+  detailEditing = true;
+  renderDetail();
+}
+function stopEditing() {
+  detailEditing = false;
+  editDraft = null;
+}
+let savingEdits = false;
+async function doneEditing() {
+  if (!editDraft || savingEdits) return;
+  const { patches, invalid } = draftChanges(detailSession, editDraft);
+  if (invalid.length) {
+    for (const b of invalid) {
+      const { st } = findEditSet(b.exId, b.setId);
+      if (st) showSetErrors(b.setId, st);   // red inputs for out-of-range values
+      const row = el('setrow-' + b.setId);  // ...and for a value that was blanked
+      if (row) row.querySelectorAll('.set-input').forEach(inp => {
+        if (inp.value === '') inp.classList.add('invalid');
+      });
+      const msg = el('seterr-' + b.setId);
+      if (msg) msg.textContent = b.message;
+    }
+    alert(`Fix the highlighted set values first.\n${SET_LIMITS_MSG}`);
+    return;
+  }
+  savingEdits = true;
+  try {
+    // One PATCH per changed set, only the changed fields. Each success is
+    // applied to my copy at once, so a retry after a failure resends only
+    // what's still unsaved.
+    for (const pch of patches) {
+      try {
+        await PATCH(`/sessions/${detailSession.id}/exercises/${pch.exId}/sets/${pch.setId}`, pch.fields);
+      } catch (err) {
+        editRejected(err);
+        return;           // stay in edit mode with the draft intact (unless 403)
+      }
+      const ex = (detailSession.exercises || []).find(e => e.id === pch.exId);
+      const st = ex && ex.sets.find(x => x.id === pch.setId);
+      if (st) Object.assign(st, pch.fields);
+      markDetailEdited();
+    }
+  } finally {
+    savingEdits = false;
+  }
+  stopEditing();
+  await refreshDetailSession();
+}
+
+function renderDetailEdit() {
+  const sess = editDraft;
+  el('detail-exercises').innerHTML = (sess.exercises || []).map(ex => `
+    <div class="ex-card" id="edcard-${esc(ex.id)}">
+      <div class="ex-header">
+        <div class="flex-fill"><div class="disp-md">${esc(ex.name)}</div></div>
+        <button class="ex-del" aria-label="remove exercise" onclick="editRemoveExercise(${jsArg(ex.id)})">×</button>
+      </div>
+      ${ex.sets.length ? `
+      <div class="edit-set-row">
+        <div class="set-header-cell">#</div><div class="set-header-cell">REPS</div><div class="set-header-cell">LB</div><div></div>
+      </div>` : ''}
+      ${ex.sets.map((st, si) => `
+        <div class="edit-set-row" id="setrow-${esc(st.id)}">
+          <div class="set-num saved">${si + 1}</div>
+          <input class="set-input ${setFieldError('reps', st.reps) ? 'invalid' : ''}" data-field="reps" type="number" inputmode="numeric" placeholder="—"
+            value="${esc(st.reps ?? '')}" oninput="editSetField(${jsArg(ex.id)},${jsArg(st.id)},'reps',this.value)">
+          <input class="set-input ${setFieldError('weight', st.weight) ? 'invalid' : ''}" data-field="weight" type="number" inputmode="decimal" placeholder="—"
+            value="${esc(st.weight ?? '')}" oninput="editSetField(${jsArg(ex.id)},${jsArg(st.id)},'weight',this.value)">
+          <button class="set-del-btn" aria-label="delete set" onclick="editRemoveSet(${jsArg(ex.id)},${jsArg(st.id)})">×</button>
+        </div>
+        <div class="set-err" id="seterr-${esc(st.id)}">${esc(setErrorText(st))}</div>`).join('')}
+      <button class="btn-ghost" onclick="editAddSet(${jsArg(ex.id)})">+ add set</button>
+    </div>`).join('') || `<div class="empty">no exercises left in this workout</div>`;
+}
+
+function findEditSet(exId, setId) {
+  const ex = (editDraft?.exercises || []).find(e => e.id === exId);
+  return { ex, st: ex && ex.sets.find(x => x.id === setId) };
+}
+// Typing only changes the draft: nothing is sent until "done".
+function editSetField(exId, setId, field, val) {
+  if (!detailEditing || !editDraft) return;
+  const { st } = findEditSet(exId, setId);
+  if (!st) return;
+  st[field] = val;
+  showSetErrors(setId, st);
+}
+// Apply a structural change to both my stored copy and the draft.
+function inBoth(fn) {
+  fn(detailSession);
+  if (editDraft) fn(editDraft);
+}
+async function editAddSet(exId) {
+  const sess = detailSession;
+  if (!(sess.exercises || []).some(e => e.id === exId)) return;
+  const id = uid();
+  if (await editCall(() => POST(`/sessions/${sess.id}/exercises/${exId}/sets`, { id }))) {
+    inBoth(w => {
+      const ex = (w.exercises || []).find(e => e.id === exId);
+      if (ex) ex.sets.push({ id, reps: w === detailSession ? null : '', weight: w === detailSession ? null : '', savedAt: null });
+    });
+    if (detailEditing) renderDetail();
+  }
+}
+async function editRemoveSet(exId, setId) {
+  const sess = detailSession;
+  if (await editCall(() => DELETE(`/sessions/${sess.id}/exercises/${exId}/sets/${setId}`))) {
+    inBoth(w => {
+      const ex = (w.exercises || []).find(e => e.id === exId);
+      if (ex) ex.sets = ex.sets.filter(x => x.id !== setId);
+    });
+    if (detailEditing) renderDetail();
+  }
+}
+async function editRemoveExercise(exId) {
+  const sess = detailSession;
+  const ex = (sess.exercises || []).find(e => e.id === exId);
+  if (!ex || !confirm(`Remove ${ex.name} and its ${ex.sets.length} set(s) from this workout?`)) return;
+  if (await editCall(() => DELETE(`/sessions/${sess.id}/exercises/${exId}`))) {
+    inBoth(w => { w.exercises = (w.exercises || []).filter(e => e.id !== exId); });
+    if (detailEditing) renderDetail();
+  }
+}
+async function deleteWorkout() {
+  const sess = detailSession;
+  if (!sess || detailOwner) return;
+  if (!confirm(`Delete this workout from ${fmtDate(sess.startedAt)}? This can't be undone.`)) return;
+  try {
+    await DELETE(`/sessions/${sess.id}`);
+  } catch (err) {
+    if (err.status !== 404) { editRejected(err); return; }
+  }
+  sessions = sessions.filter(x => x.id !== sess.id);
+  stopEditing();
+  detailSession = null;
+  showView('history');
+}
+
 // ─── Friends ──────────────────────────────────────────────────────────────────
 function sessionCard(s, onclick, showWho) {
   const sets = (s.exercises||[]).reduce((a,e)=>a+(e.sets||[]).length,0);
@@ -984,7 +1232,7 @@ function sessionCard(s, onclick, showWho) {
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
         <div class="flex-fill">
           ${showWho ? `<div class="who">@${esc(s.username)}</div>` : ''}
-          <div class="disp-sm">${fmtDate(s.startedAt)}</div>
+          <div class="disp-sm">${fmtDate(s.startedAt)}${s.editedAt ? editedTag(s.editedAt) : ''}</div>
           <div class="text-d">${fmtTime(s.startedAt)}${s.finishedAt ? ' → ' + fmtTime(s.finishedAt) : ''} · ${(s.exercises||[]).length} exercises · ${sets} sets</div>
           <div style="margin-top:8px; line-height:2;">${(s.exercises||[]).map(e=>`<span class="pill">${esc(e.name)}</span>`).join('')}</div>
         </div>
@@ -1266,7 +1514,7 @@ function renderPoints(data) {
   const r = data.rules;
   el('lb-head').innerHTML = `
     <div class="lb-period">${esc(fmtDay(data.startDate))} – ${esc(fmtDay(data.endDate))} · <span class="text-accent">${esc(resetsIn(data.end))}</span></div>
-    <div class="lb-rules">+1% on your best estimated 1RM vs your last ${r.baselineWeeks} weeks = ${r.pointsPerPercent} pts (max ${r.progressCap} per exercise) · ${r.pointsPerDay} pts per workout day (max ${r.daysCap}) · tap a row for details</div>`;
+    <div class="lb-rules">+1% on your best estimated 1RM vs your last ${r.baselineWeeks} weeks = ${r.pointsPerPercent} pts (max ${r.progressCap} per exercise, ${r.progressTotalCap} total this ${word}; jumps over ${r.maxGainPct}% don't count) · ${r.pointsPerDay} pts per workout day (max ${r.daysCap}) · tap a row for details</div>`;
   const noPoints = data.entries.every(e => e.total === 0);
   el('lb-list').innerHTML = (noPoints
       ? `<div class="empty" style="padding:4px 0 14px;">no points yet this ${word} — finish a workout to get on the board</div>` : '')
@@ -1303,11 +1551,16 @@ function pointsBreakdown(e, data) {
       <span class="val${x.points ? '' : ' zero'}">${x.points}</span>
     </div>`;
   }).join('') : `<div class="lb-line"><span class="main text-d">no lifts in the 1–${data.rules.maxReps} rep range this ${data.period}</span></div>`;
-  return `<div class="lb-detail">${consistency}${lifts}</div>`;
+  const cap = e.progressCapped ? `
+    <div class="lb-line">
+      <span class="main">progress total<span class="sub">${e.progressRaw} pts → capped at ${data.rules.progressTotalCap} per ${data.period}</span></span>
+      <span class="val">${e.progress}</span>
+    </div>` : '';
+  return `<div class="lb-detail">${consistency}${cap}${lifts}</div>`;
 }
 
 function renderStrength(data) {
-  el('lb-head').innerHTML = `<div class="lb-rules">all-time heaviest weight lifted for at least 1 rep · ties: more reps, then first to do it · tap an exercise for everyone's best</div>`;
+  el('lb-head').innerHTML = `<div class="lb-rules">all-time heaviest weight lifted for at least 1 rep · ties: more reps, then first to do it · a workout's best only counts once another of your workouts comes within ${data.crownMaxJumpPct ?? 50}% of it (until then it's "unverified") · tap an exercise for everyone's best</div>`;
   const filter = el('lb-filter');
   filter.style.display = data.exercises.length ? '' : 'none';
   if (!data.exercises.length) {
@@ -1320,12 +1573,14 @@ function renderStrength(data) {
   el('lb-list').innerHTML = list.map(x => {
     const key = x.name.toLowerCase();
     const open = lbOpen.strength === key;
-    const h = x.holder;
+    const h = x.holder;   // null while every top lift is unverified
     return `
       <button class="lb-row${open ? ' open' : ''}" data-key="${esc(key)}">
         <span class="lb-name" style="white-space:normal;">
           <span class="lb-ex-name">${esc(x.name)}</span>
-          <span class="sub">👑 @${esc(h.username)}${h.isYou ? ' (you)' : ''} · ${fmtNum(h.weight)} lb × ${h.reps} · ${esc(fmtShortDate(h.date))}</span>
+          <span class="sub">${h
+            ? `👑 @${esc(h.username)}${h.isYou ? ' (you)' : ''} · ${fmtNum(h.weight)} lb × ${h.reps} · ${esc(fmtShortDate(h.date))}${h.edited ? editedTag() : ''}`
+            : `no verified lift yet`}</span>
         </span>
         <span class="lb-chev">${open ? '▾' : '›'}</span>
       </button>
@@ -1340,7 +1595,12 @@ function strengthDetail(key) {
   return `<div class="lb-detail">${d.entries.map(e => `
     <div class="lb-line${e.isYou ? ' you' : ''}">
       <span class="lb-rank${e.rank === 1 ? ' first' : ''}" style="font-size:17px;">${e.rank === 1 ? '👑' : e.rank}</span>
-      <span class="main">@${esc(e.username)}${e.isYou ? ' (you)' : ''}<span class="sub">${esc(fmtShortDate(e.date))}${e.e1rm !== null ? ` · e1RM ~${fmtNum(e.e1rm)} lb` : ''}</span></span>
+      <span class="main">@${esc(e.username)}${e.isYou ? ' (you)' : ''}<span class="sub">${esc(fmtShortDate(e.date))}${e.e1rm !== null ? ` · e1RM ~${fmtNum(e.e1rm)} lb` : ''}${e.edited ? editedTag() : ''}</span></span>
+      <span class="val">${fmtNum(e.weight)}<small style="font-family:var(--mono); font-size:10px; color:var(--text-d);"> × ${e.reps}</small></span>
+    </div>`).join('')}${(d.unverified || []).map(e => `
+    <div class="lb-line unverified">
+      <span class="lb-rank" style="font-size:17px;">–</span>
+      <span class="main">@${esc(e.username)}${e.isYou ? ' (you)' : ''}<span class="lb-unv">unverified</span><span class="sub">${esc(fmtShortDate(e.date))} · counts once another workout comes within ${d.crownMaxJumpPct ?? 50}% of it${e.edited ? editedTag() : ''}</span></span>
       <span class="val">${fmtNum(e.weight)}<small style="font-family:var(--mono); font-size:10px; color:var(--text-d);"> × ${e.reps}</small></span>
     </div>`).join('')}</div>`;
 }
@@ -1631,6 +1891,7 @@ Object.assign(window, {
   onFriendSearch, sendRequest, acceptRequest, declineRequest, cancelRequest, removeFriend,
   openFriendHistory, loadMoreFriendHistory, openFhItem, loadMoreFeed, openFeedItem,
   renderLeaderboard,
+  startEditing, doneEditing, editSetField, editAddSet, editRemoveSet, editRemoveExercise, deleteWorkout,
 });
 
 // ─── Boot: require a valid token before loading the app ───────────────────────

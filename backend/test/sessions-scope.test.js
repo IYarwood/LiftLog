@@ -32,14 +32,15 @@ test('GET /api/sessions hydrates rows without re-querying each session', async (
   mock.method(pool, 'query', async (sql) => {
     if (/FROM sessions WHERE/.test(sql)) {
       sessionSelects++;
-      return { rows: [{ id: 'sess1', started_at: 'T0', finished_at: 'T1' }] };
+      return { rows: [{ id: 'sess1', started_at: 'T0', finished_at: '2026-11-20T10:00:00.000Z', edited_at: null }] };
     }
     return { rows: [] };   // session_exercises (and any sets) come back empty
   });
   const res = await request(app).get('/api/sessions').set('Authorization', `Bearer ${token}`);
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(res.body, [
-    { id: 'sess1', startedAt: 'T0', finishedAt: 'T1', exercises: [] },
+    { id: 'sess1', startedAt: 'T0', finishedAt: '2026-11-20T10:00:00.000Z', editedAt: null,
+      editableUntil: '2026-11-27T10:00:00.000Z', exercises: [] },   // 7-day edit window
   ]);
   assert.strictEqual(sessionSelects, 1);   // only the list query — no per-row re-fetch
 });

@@ -160,7 +160,8 @@ describe('editing finished workouts (integration, real test DB)', { skip }, () =
       // Baseline 3 weeks ago (outside the edit window): owner Deadlift 5×200,
       // friend holds the Deadlift crown with 290×1.
       await makeSession('owner', ago(21 * DAY), [['Deadlift', 5, 200]]);
-      await makeSession('friend', ago(21 * DAY), [['Deadlift', 1, 270], ['Deadlift', 1, 290]]);
+      await makeSession('friend', ago(22 * DAY), [['Deadlift', 1, 270]]);   // backs up the 290 (crown guard)
+      await makeSession('friend', ago(21 * DAY), [['Deadlift', 1, 290]]);
       lift = await makeSession('owner', ago(1), [['Deadlift', 5, 200]]);   // this week, no gain yet
     });
 

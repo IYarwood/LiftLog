@@ -1513,7 +1513,7 @@ function pointsBreakdown(e, data) {
 }
 
 function renderStrength(data) {
-  el('lb-head').innerHTML = `<div class="lb-rules">all-time heaviest weight lifted for at least 1 rep · ties: more reps, then first to do it · a lift more than ${data.crownMaxJumpPct ?? 50}% above your next-best is "unverified" until you back it up · tap an exercise for everyone's best</div>`;
+  el('lb-head').innerHTML = `<div class="lb-rules">all-time heaviest weight lifted for at least 1 rep · ties: more reps, then first to do it · a workout's best only counts once another of your workouts comes within ${data.crownMaxJumpPct ?? 50}% of it (until then it's "unverified") · tap an exercise for everyone's best</div>`;
   const filter = el('lb-filter');
   filter.style.display = data.exercises.length ? '' : 'none';
   if (!data.exercises.length) {
@@ -1553,7 +1553,7 @@ function strengthDetail(key) {
     </div>`).join('')}${(d.unverified || []).map(e => `
     <div class="lb-line unverified">
       <span class="lb-rank" style="font-size:17px;">–</span>
-      <span class="main">@${esc(e.username)}${e.isYou ? ' (you)' : ''}<span class="lb-unv">unverified</span><span class="sub">${esc(fmtShortDate(e.date))} · counts once backed up by another lift within ${d.crownMaxJumpPct ?? 50}% of it${e.edited ? editedTag() : ''}</span></span>
+      <span class="main">@${esc(e.username)}${e.isYou ? ' (you)' : ''}<span class="lb-unv">unverified</span><span class="sub">${esc(fmtShortDate(e.date))} · counts once another workout comes within ${d.crownMaxJumpPct ?? 50}% of it${e.edited ? editedTag() : ''}</span></span>
       <span class="val">${fmtNum(e.weight)}<small style="font-family:var(--mono); font-size:10px; color:var(--text-d);"> × ${e.reps}</small></span>
     </div>`).join('')}</div>`;
 }

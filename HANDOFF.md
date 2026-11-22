@@ -335,10 +335,12 @@ rep range). Timezone defaults to `America/New_York`; set `LEADERBOARD_TZ=<IANA z
 - **Strength:** heaviest weight (reps ≥ 1, weight > 0); tiebreak more reps, then earliest
   finished session. e1RM is shown only for ≤ 12 reps and never used for ranking.
   Bodyweight sets (weight 0) don't appear.
-  **Crown guard** (`CROWN_MAX_JUMP_PCT` = 50): a user's top lift only ranks if another lift
-  of theirs for that exercise is within 50% of it (top ≤ next × 1.5). Otherwise it's
-  returned in `unverified` (greyed out in the UI) and their next lift ranks instead; with
-  only one lift, they have no ranked entry yet and the exercise may have `holder: null`.
+  **Crown guard** (`CROWN_MAX_JUMP_PCT` = 50), judged per WORKOUT: take each user's best
+  lift per workout; a workout's best only ranks if a DIFFERENT workout's best is within 50%
+  of it, either way (so 2250 typed for all 3 sets of one workout can't back itself up, and a
+  bogus 9999 can't back up a bogus 2250). The user's ranked lift is their heaviest backed-up
+  workout best; the ones above it come back in `unverified` (greyed out in the UI). A user
+  with one workout of an exercise has no ranked entry yet; an exercise may have `holder: null`.
 
 ---
 

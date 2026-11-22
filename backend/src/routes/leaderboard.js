@@ -137,42 +137,39 @@ async function pointsBoard(viewerId, period, { offset = 0, now = new Date(), tz 
   };
 }
 
-// Each board member's top 2 lifts per exercise (all-time, finished workouts,
-// weight > 0, reps >= 1), ordered heaviest → more reps → first, with the weight
-// of the lift below each (for the crown guard). `key` (lowercased name) narrows
-// it to one exercise.
+// Each board member's best lift PER WORKOUT for each exercise (all-time,
+// finished workouts, weight > 0, reps >= 1): heaviest → more reps. The crown
+// guard compares these across workouts. `key` (lowercased name) narrows it to
+// one exercise.
 async function strengthRows(viewerId, key) {
   const params = [viewerId];
   let keySql = '';
   if (key !== undefined) { params.push(key); keySql = 'AND lower(se.name) = $2'; }
   const r = await pool.query(
     `WITH ${BOARD_CTE},
-     lifts AS (
-       SELECT lower(se.name) AS key, se.name, s.user_id, st.weight, st.reps, s.finished_at,
-              (s.edited_at IS NOT NULL) AS edited,
-              row_number() OVER w AS rn,
-              lead(st.weight) OVER w AS next_weight
+     per_session AS (
+       SELECT DISTINCT ON (lower(se.name), s.id)
+              lower(se.name) AS key, se.name, s.user_id, s.id AS session_id,
+              st.weight, st.reps, s.finished_at, (s.edited_at IS NOT NULL) AS edited
          FROM sessions s
          JOIN session_exercises se ON se.session_id = s.id
          JOIN sets st ON st.session_exercise_id = se.id
         WHERE s.user_id IN (SELECT id FROM board)
           AND s.finished_at IS NOT NULL
           AND st.weight > 0 AND st.reps >= 1 ${keySql}
-       WINDOW w AS (PARTITION BY lower(se.name), s.user_id
-                    ORDER BY st.weight DESC, st.reps DESC, s.finished_at ASC, st.id ASC)
+        ORDER BY lower(se.name), s.id, st.weight DESC, st.reps DESC, st.id ASC
      )
-     SELECT l.key, COALESCE(ex.name, l.name) AS name, u.id AS user_id, u.username,
-            l.weight, l.reps, l.finished_at, l.edited, l.rn, l.next_weight
-       FROM lifts l
-       JOIN users u ON u.id = l.user_id
-       LEFT JOIN exercises ex ON lower(ex.name) = l.key
-      WHERE l.rn <= 2
-      ORDER BY l.key, l.user_id, l.rn`,
+     SELECT p.key, COALESCE(ex.name, p.name) AS name, u.id AS user_id, u.username,
+            p.session_id, p.weight, p.reps, p.finished_at, p.edited
+       FROM per_session p
+       JOIN users u ON u.id = p.user_id
+       LEFT JOIN exercises ex ON lower(ex.name) = p.key
+      ORDER BY p.key, p.user_id, p.weight DESC, p.reps DESC, p.finished_at ASC`,
     params
   );
   return r.rows.map(row => ({
     key: row.key, name: row.name, userId: row.user_id, username: row.username,
-    rn: Number(row.rn), weight: toWeight(row.weight), nextWeight: toWeight(row.next_weight),
+    sessionId: row.session_id, weight: toWeight(row.weight),
     reps: row.reps, date: row.finished_at, edited: row.edited === true,
   }));
 }

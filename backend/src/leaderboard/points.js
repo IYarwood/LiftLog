@@ -31,10 +31,11 @@ const DAYS_CAP = { week: 4, month: 16 };
 
 const PERIODS = ['week', 'month'];
 
-// Strength crown guard: a user's top lift for an exercise can't take or hold
-// the crown while it is more than this many percent heavier than their
-// next-best lift of that exercise (a typo like 2250 for 225). It counts as soon
-// as they log a second lift within this margin of it.
+// Strength crown guard, judged per WORKOUT (people type the same weight for
+// every set, so a typo repeated over 3 sets must not vouch for itself): a
+// workout's best lift only counts if a DIFFERENT workout's best for that
+// exercise is within this many percent of it (either way). A typo like 2250
+// for 225 never holds the crown; a real PR counts once another workout backs it.
 const CROWN_MAX_JUMP_PCT = 50;
 
 // Epley estimated 1RM.
@@ -73,13 +74,19 @@ function assignRanks(rows, sameAs) {
   return rows;
 }
 
-// Is a user's rn-th best lift (1 = their top) verified? `weight` is its weight,
-// `nextWeight` that of the lift just below it (null if none). Anything below the
-// top is backed by a heavier lift, so only the top can be unverified.
-function isVerifiedLift(rn, weight, nextWeight) {
-  if (rn > 1) return true;
-  if (nextWeight === null || nextWeight === undefined) return false;
-  return weight <= nextWeight * (1 + CROWN_MAX_JUMP_PCT / 100) + 1e-9;
+// Are two weights within CROWN_MAX_JUMP_PCT of each other (the heavier at most
+// that much above the lighter)? Exactly +50% still counts.
+function withinCrownJump(a, b) {
+  const hi = Math.max(a, b), lo = Math.min(a, b);
+  return hi <= lo * (1 + CROWN_MAX_JUMP_PCT / 100) + 1e-9;
+}
+
+// Is one workout's best lift verified? `weight` is that workout's best weight;
+// `otherWeights` are the user's per-workout bests from their OTHER workouts of
+// the exercise. Verified iff one of them is within the jump margin. A heavier
+// outlier doesn't vouch for a lift (9999 can't back up 2250).
+function isVerifiedLift(weight, otherWeights) {
+  return otherWeights.some(w => withinCrownJump(weight, w));
 }
 
 // Strength order: heavier → more reps at that weight → done first → name.
@@ -88,10 +95,13 @@ function compareLifts(a, b) {
     new Date(a.date) - new Date(b.date) || a.username.localeCompare(b.username);
 }
 
-// rows: each user's top 2 lifts for ONE exercise, as
-//   { userId, username, rn, weight, nextWeight, reps, date, ... }.
-// Returns { ranked, unverified }: ranked = each user's best VERIFIED lift in
-// crown order (with ranks); unverified = top lifts that fail the guard.
+// rows: each user's best lift PER WORKOUT for ONE exercise, as
+//   { userId, username, sessionId, weight, reps, date, ... }.
+// For each user, their ranked lift is the heaviest per-workout best that another
+// of their workouts backs up (see isVerifiedLift). Returns { ranked, unverified }:
+//   ranked     = one lift per user with a verified lift, in crown order, with ranks
+//   unverified = per-workout bests held back: every one above the user's ranked
+//                lift, or just their top one if nothing of theirs is verified yet.
 function strengthStandings(rows) {
   const byUser = new Map();
   for (const r of rows) {
@@ -100,10 +110,15 @@ function strengthStandings(rows) {
   }
   const ranked = [], unverified = [];
   for (const lifts of byUser.values()) {
-    lifts.sort((a, b) => a.rn - b.rn);
-    const best = lifts.find(l => isVerifiedLift(l.rn, l.weight, l.nextWeight));
-    if (best) ranked.push(best);
-    if (lifts[0] !== best) unverified.push(lifts[0]);
+    lifts.sort(compareLifts);
+    const idx = lifts.findIndex((l, i) =>
+      isVerifiedLift(l.weight, lifts.filter((_, j) => j !== i).map(o => o.weight)));
+    if (idx >= 0) {
+      ranked.push(lifts[idx]);
+      unverified.push(...lifts.slice(0, idx));
+    } else {
+      unverified.push(lifts[0]);
+    }
   }
   ranked.sort(compareLifts);
   unverified.sort(compareLifts);
@@ -160,5 +175,5 @@ module.exports = {
   TIMEZONE, E1RM_MIN_REPS, E1RM_MAX_REPS, BASELINE_WEEKS, POINTS_PER_PERCENT,
   PROGRESS_CAP, PROGRESS_TOTAL_CAP, MAX_PLAUSIBLE_GAIN_PCT, POINTS_PER_DAY, DAYS_CAP, PERIODS, CROWN_MAX_JUMP_PCT,
   e1rm, progressPoints, consistencyPoints, assignRanks, buildBoard, round1,
-  isVerifiedLift, strengthStandings,
+  withinCrownJump, isVerifiedLift, strengthStandings,
 };

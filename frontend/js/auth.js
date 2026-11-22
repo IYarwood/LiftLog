@@ -1,4 +1,4 @@
-import { setToken } from './api.js';
+import { setToken } from './api.js?v=dev';
 
 const form = document.getElementById('login-form');
 const errorEl = document.getElementById('login-error');

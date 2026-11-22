@@ -96,7 +96,15 @@ cd /var/work/LiftLog
 ./deploy.sh
 ```
 
-`deploy.sh` does: `git pull` → `npm install` → `pm2 restart liftlog`
+`deploy.sh` does: un-stamp asset versions → `git pull` → `stamp-assets.sh` → `npm install` → `pm2 restart liftlog`
+
+### Frontend cache-busting
+`index.html`, `login.html` and `js/auth.js` reference `api.js` / `auth.js` /
+`auth.css` with `?v=dev`. `stamp-assets.sh` (run by `deploy.sh`) rewrites that
+to `?v=<git short SHA>` so Safari fetches fresh copies after every deploy.
+After a deploy those three files show as modified in `git status` — expected;
+`deploy.sh` resets them before the next pull. A new script/stylesheet/import
+should use `?v=dev` and be listed in `stamp-assets.sh`.
 
 ---
 

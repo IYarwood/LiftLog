@@ -108,19 +108,6 @@ export function createSaveQueue(send, delay = 600, { onRejected } = {}) {
       pending.delete(key);
       latest.delete(key);   // an in-flight send for it won't be requeued
     },
-    // Forget ONE field of a key's pending save (e.g. it now holds a value that
-    // must not be sent); its other fields still go. A failed earlier send of
-    // that field is not retried either.
-    dropField(key, field) {
-      const lv = latest.get(key);
-      if (lv && field in lv) lv[field] = ++version;   // no queued/in-flight copy matches any more
-      const p = pending.get(key);
-      if (!p || !(field in p.fields)) return;
-      const fields = { ...p.fields }, vers = { ...p.vers };
-      delete fields[field]; delete vers[field];
-      if (!Object.keys(fields).length) { clearTimeout(p.timer); pending.delete(key); return; }
-      pending.set(key, { ...p, fields, vers });
-    },
     // Drop every pending save for which `shouldDrop(target)` is true — e.g. its
     // set or exercise no longer exists. Returns how many were dropped.
     dropWhere(shouldDrop) {

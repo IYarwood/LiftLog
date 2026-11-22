@@ -468,7 +468,8 @@
 <script type="module">
 import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
 import { createSaveQueue } from './js/saveQueue.js?v=dev';
-import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue, editFieldSaveValue } from './js/setFields.js?v=dev';
+import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue } from './js/setFields.js?v=dev';
+import { makeDraft, draftChanges, hasDraftChanges } from './js/editDraft.js?v=dev';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let exercises = [];   // string[]
@@ -479,6 +480,7 @@ let detailSession = null;
 let detailOwner = null;      // null = my session; username = a friend's (read-only)
 let detailReturn = 'history'; // view to go back to from session detail
 let detailEditing = false;    // my finished workout is open in edit mode
+let editDraft = null;         // local copy being edited; sent only on "done"
 let manageReturn = 'home';    // view to go back to from the exercises page
 let manageEditing = null;     // library name currently being renamed, or null
 let manageDraft = '';         // text in the rename input (survives re-renders)
@@ -538,12 +540,10 @@ function showView(name, opts = {}) {
   // Leaving the exercises page: drop its status/error and any half-done rename.
   if (currentView === 'manage' && name !== 'manage') { manageMsg(''); manageEditing = null; }
   if (currentView === 'session-detail' && name !== 'session-detail' && detailEditing) {
-    detailEditing = false;
-    // Send the valid edits typed in the last 600ms (invalid ones were never
-    // queued), then replace my copy with the server's so no invalid value
-    // lingers on screen.
-    const leftId = detailSession && detailSession.id;
-    editSaves.flushAll().then(() => refreshDetailSession(leftId));
+    // Typed values are only saved by "done": leaving discards them.
+    if (editDraft && hasDraftChanges(detailSession, editDraft) &&
+        !confirm('Discard your unsaved changes to this workout?')) return;
+    stopEditing();
   }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   el('view-' + name).classList.add('active');
@@ -949,7 +949,7 @@ function openDetail(sessionId) {
   detailSession = sessions.find(s => s.id === sessionId);
   if (!detailSession) return;
   detailOwner = null;
-  detailEditing = false;
+  stopEditing();
   detailReturn = currentView === 'home' ? 'home' : 'history';
   showView('session-detail');
 }
@@ -957,7 +957,7 @@ function openDetail(sessionId) {
 function openFriendDetail(sess, returnTo) {
   detailSession = sess;
   detailOwner = sess.username;
-  detailEditing = false;
+  stopEditing();
   detailReturn = returnTo;
   showView('session-detail');
 }
@@ -971,14 +971,14 @@ function renderDetail() {
 
   // Edit button only on MY finished workouts, and only inside the edit window.
   const mine = !detailOwner && !!detailSession.finishedAt;
-  if (mine && detailEditing && !canEditSession(detailSession)) detailEditing = false;
+  if (mine && detailEditing && !canEditSession(detailSession)) stopEditing();
   el('detail-actions').innerHTML = !mine ? ''
     : detailEditing ? `<button class="mini-btn accent" onclick="doneEditing()">done</button>`
     : canEditSession(detailSession) ? `<button class="mini-btn" onclick="startEditing()">edit</button>`
     : `<div class="edit-closed">editing closed</div>`;
   el('detail-footer').innerHTML = detailEditing
     ? `<button class="btn-danger" onclick="deleteWorkout()">DELETE WORKOUT</button>` : '';
-  if (detailEditing) { renderDetailEdit(); return; }
+  if (detailEditing && editDraft) { renderDetailEdit(); return; }
 
   el('detail-exercises').innerHTML = (detailSession.exercises||[]).map(ex => {
     // All-time stats come from MY history, so only show them on my own sessions
@@ -1036,19 +1036,13 @@ function editedTag(iso) {
   return `<span class="edited-tag"${iso ? ` title="edited ${esc(fmtDate(iso))}"` : ""}>edited</span>`;
 }
 
-// Debounced set saves for the workout being edited (same rules as the live
-// workout: an invalid value is saved as null and stays red until fixed).
-const editSaves = createSaveQueue(
-  ({ sessionId, exId, setId }, fields) =>
-    PATCH(`/sessions/${sessionId}/exercises/${exId}/sets/${setId}`, fields),
-  600,
-  { onRejected(target, fields, err) { editRejected(err); } }
-);
-
+// Field edits are NOT autosaved: they live in editDraft (js/editDraft.js) until
+// "done". Adding/deleting a set, removing an exercise and deleting the workout
+// are explicit actions and go to the server immediately.
 function editRejected(err) {
   if (err && err.status === 403) {
     alert((err.body && err.body.error) || 'Editing closed for this workout.');
-    detailEditing = false;
+    stopEditing();
     refreshDetailSession();
   } else if (err && err.status === 400) {
     alert(`Not saved: ${(err.body && err.body.error) || 'invalid value'}.`);
@@ -1058,7 +1052,7 @@ function editRejected(err) {
     alert('Could not save the change — check your connection and try again.');
   }
 }
-// Run one edit call; returns true on success.
+// Run one immediate edit call; returns true on success.
 async function editCall(fn) {
   try { await fn(); markDetailEdited(); return true; }
   catch (err) { editRejected(err); return false; }
@@ -1091,20 +1085,58 @@ async function refreshDetailSession(id = (detailSession && !detailOwner) ? detai
 
 function startEditing() {
   if (!detailSession || detailOwner || !canEditSession(detailSession)) return;
+  editDraft = makeDraft(detailSession);
   detailEditing = true;
   renderDetail();
 }
-async function doneEditing() {
-  const bad = (detailSession.exercises || []).flatMap(ex => ex.sets).find(st => setErrorText(st));
-  if (bad) { showSetErrors(bad.id, bad); alert(`Fix the highlighted set value first.\n${SET_LIMITS_MSG}`); return; }
-  if (!(await editSaves.flushAll()) && !confirm('Some changes could not be saved. Stop editing anyway?')) return;
-  // Fields left blank were never sent: the refresh below shows the stored value again.
+function stopEditing() {
   detailEditing = false;
+  editDraft = null;
+}
+let savingEdits = false;
+async function doneEditing() {
+  if (!editDraft || savingEdits) return;
+  const { patches, invalid } = draftChanges(detailSession, editDraft);
+  if (invalid.length) {
+    for (const b of invalid) {
+      const { st } = findEditSet(b.exId, b.setId);
+      if (st) showSetErrors(b.setId, st);   // red inputs for out-of-range values
+      const row = el('setrow-' + b.setId);  // ...and for a value that was blanked
+      if (row) row.querySelectorAll('.set-input').forEach(inp => {
+        if (inp.value === '') inp.classList.add('invalid');
+      });
+      const msg = el('seterr-' + b.setId);
+      if (msg) msg.textContent = b.message;
+    }
+    alert(`Fix the highlighted set values first.\n${SET_LIMITS_MSG}`);
+    return;
+  }
+  savingEdits = true;
+  try {
+    // One PATCH per changed set, only the changed fields. Each success is
+    // applied to my copy at once, so a retry after a failure resends only
+    // what's still unsaved.
+    for (const pch of patches) {
+      try {
+        await PATCH(`/sessions/${detailSession.id}/exercises/${pch.exId}/sets/${pch.setId}`, pch.fields);
+      } catch (err) {
+        editRejected(err);
+        return;           // stay in edit mode with the draft intact (unless 403)
+      }
+      const ex = (detailSession.exercises || []).find(e => e.id === pch.exId);
+      const st = ex && ex.sets.find(x => x.id === pch.setId);
+      if (st) Object.assign(st, pch.fields);
+      markDetailEdited();
+    }
+  } finally {
+    savingEdits = false;
+  }
+  stopEditing();
   await refreshDetailSession();
 }
 
 function renderDetailEdit() {
-  const sess = detailSession;
+  const sess = editDraft;
   el('detail-exercises').innerHTML = (sess.exercises || []).map(ex => `
     <div class="ex-card" id="edcard-${esc(ex.id)}">
       <div class="ex-header">
@@ -1130,40 +1162,41 @@ function renderDetailEdit() {
 }
 
 function findEditSet(exId, setId) {
-  const ex = (detailSession?.exercises || []).find(e => e.id === exId);
+  const ex = (editDraft?.exercises || []).find(e => e.id === exId);
   return { ex, st: ex && ex.sets.find(x => x.id === setId) };
 }
+// Typing only changes the draft: nothing is sent until "done".
 function editSetField(exId, setId, field, val) {
-  if (!detailEditing) return;
+  if (!detailEditing || !editDraft) return;
   const { st } = findEditSet(exId, setId);
   if (!st) return;
   st[field] = val;
   showSetErrors(setId, st);
-  // A finished workout's stored value is real: only a valid, non-blank value
-  // replaces it. Invalid/blank sends nothing (and cancels an unsent earlier
-  // keystroke for this field), so the server keeps its last value.
-  const v = editFieldSaveValue(field, val);
-  if (!v.send) { editSaves.dropField(setId, field); return; }
-  editSaves.schedule(setId, { sessionId: detailSession.id, exId, setId }, { [field]: v.value });
-  markDetailEdited();
+}
+// Apply a structural change to both my stored copy and the draft.
+function inBoth(fn) {
+  fn(detailSession);
+  if (editDraft) fn(editDraft);
 }
 async function editAddSet(exId) {
   const sess = detailSession;
-  const ex = (sess.exercises || []).find(e => e.id === exId);
-  if (!ex) return;
+  if (!(sess.exercises || []).some(e => e.id === exId)) return;
   const id = uid();
   if (await editCall(() => POST(`/sessions/${sess.id}/exercises/${exId}/sets`, { id }))) {
-    ex.sets.push({ id, reps: '', weight: '', savedAt: null });
-    if (detailEditing) renderDetailEdit();
+    inBoth(w => {
+      const ex = (w.exercises || []).find(e => e.id === exId);
+      if (ex) ex.sets.push({ id, reps: w === detailSession ? null : '', weight: w === detailSession ? null : '', savedAt: null });
+    });
+    if (detailEditing) renderDetail();
   }
 }
 async function editRemoveSet(exId, setId) {
   const sess = detailSession;
-  editSaves.drop(setId);
-  await editSaves.flush(setId);
   if (await editCall(() => DELETE(`/sessions/${sess.id}/exercises/${exId}/sets/${setId}`))) {
-    const { ex } = findEditSet(exId, setId);
-    if (ex) ex.sets = ex.sets.filter(x => x.id !== setId);
+    inBoth(w => {
+      const ex = (w.exercises || []).find(e => e.id === exId);
+      if (ex) ex.sets = ex.sets.filter(x => x.id !== setId);
+    });
     if (detailEditing) renderDetail();
   }
 }
@@ -1171,9 +1204,8 @@ async function editRemoveExercise(exId) {
   const sess = detailSession;
   const ex = (sess.exercises || []).find(e => e.id === exId);
   if (!ex || !confirm(`Remove ${ex.name} and its ${ex.sets.length} set(s) from this workout?`)) return;
-  ex.sets.forEach(st => editSaves.drop(st.id));
   if (await editCall(() => DELETE(`/sessions/${sess.id}/exercises/${exId}`))) {
-    sess.exercises = sess.exercises.filter(e => e.id !== exId);
+    inBoth(w => { w.exercises = (w.exercises || []).filter(e => e.id !== exId); });
     if (detailEditing) renderDetail();
   }
 }
@@ -1181,14 +1213,13 @@ async function deleteWorkout() {
   const sess = detailSession;
   if (!sess || detailOwner) return;
   if (!confirm(`Delete this workout from ${fmtDate(sess.startedAt)}? This can't be undone.`)) return;
-  editSaves.dropWhere(t => t.sessionId === sess.id);
   try {
     await DELETE(`/sessions/${sess.id}`);
   } catch (err) {
     if (err.status !== 404) { editRejected(err); return; }
   }
   sessions = sessions.filter(x => x.id !== sess.id);
-  detailEditing = false;
+  stopEditing();
   detailSession = null;
   showView('history');
 }

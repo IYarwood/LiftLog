@@ -214,6 +214,11 @@ workouts are never limited. Any write to a finished workout sets `sessions.edite
 (shown as an "edited" tag in the detail view, the feed and on strength-board PRs).
 `PATCH /finish` on an already-finished workout is a 200 no-op (it no longer moves `finished_at`).
 Session shape gains `editedAt` (null if never edited) and `editableUntil`.
+The edit UI never autosaves set values: typed changes live in a local draft
+(`frontend/js/editDraft.js`) and only **done** sends them, one PATCH per changed set with only
+the changed fields, after validation. Leaving without done discards the draft (confirm if
+changed). Add/delete set, remove exercise and delete workout are immediate. A PATCH that would
+clear reps/weight (null) on a finished workout is a 400. Live workouts keep the autosave queue.
 
 ### Session shape returned by API
 ```json

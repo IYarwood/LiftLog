@@ -296,38 +296,3 @@ test('flush on a key with nothing pending or in flight resolves immediately', as
   const q = createSaveQueue(async () => {}, 600);
   await q.flush('nothing');
 });
-
-test('dropField removes one field of a pending save; the others still go', async () => {
-  const { createSaveQueue } = await load();
-  const { sent, send } = recorder();
-  const q = createSaveQueue(send, 20);
-  q.schedule('s1', { id: 's1' }, { reps: 5 });
-  q.schedule('s1', { id: 's1' }, { weight: 190 });
-  q.dropField('s1', 'weight');
-  await sleep(40);
-  assert.deepStrictEqual(sent.map(x => x.fields), [{ reps: 5 }]);
-});
-
-test('dropField of the only field cancels the save; dropField on nothing is a no-op', async () => {
-  const { createSaveQueue } = await load();
-  const { sent, send } = recorder();
-  const q = createSaveQueue(send, 20);
-  q.dropField('nope', 'reps');
-  q.schedule('s1', { id: 's1' }, { weight: 1000 });
-  q.dropField('s1', 'weight');
-  assert.strictEqual(q.size, 0);
-  assert.strictEqual(await q.flushAll(), true);
-  await sleep(40);
-  assert.deepStrictEqual(sent, []);
-});
-
-test('dropField: a failed earlier send of that field is not retried', async () => {
-  const { createSaveQueue } = await load();
-  const { sent, send } = recorder({ failTimes: 1 });
-  const q = createSaveQueue(send, 20);
-  q.schedule('s1', { id: 's1' }, { weight: 100, reps: 5 });
-  assert.strictEqual(await q.flushAll(), false);   // failed, requeued
-  q.dropField('s1', 'weight');
-  assert.strictEqual(await q.flushAll(), true);
-  assert.deepStrictEqual(sent.map(x => x.fields), [{ reps: 5 }]);
-});

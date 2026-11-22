@@ -37,14 +37,3 @@ export function fieldSaveValue(field, val) {
   if (isBlank(val) || setFieldError(field, val)) return null;
   return val;
 }
-
-// Editing a FINISHED workout is different: the server already holds a real
-// value, and anything sent replaces it right away. So a field is only sent when
-// it holds a valid, non-blank value. An invalid or blank field sends nothing:
-// the server keeps its last value until the field is fixed (and the screen is
-// reset from the server when editing ends). Returns { send: true, value } or
-// { send: false }.
-export function editFieldSaveValue(field, val) {
-  if (isBlank(val) || setFieldError(field, val)) return { send: false };
-  return { send: true, value: val };
-}

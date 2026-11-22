@@ -1029,6 +1029,15 @@ async function doAddLibraryExercise() {
   try {
     await POST('/exercises', { name });
   } catch (err) {
+    if (err.status === 409) {
+      // Someone else added it (in some casing) since this list was loaded.
+      const existing = (err.body && err.body.name) || name;
+      if (!exercises.includes(existing)) exercises.push(existing);
+      sortExercises();
+      manageMsg(`"${existing}" is already in the list`, true);
+      renderManage();
+      return;
+    }
     manageMsg(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not add exercise — try again.', true);
     return;
   }
@@ -1141,18 +1150,25 @@ function renderOverlay() {
   `).join('');
 }
 
+// Library names are unique ignoring case. If the name already exists in any
+// casing — locally, or on the server when this list is stale (409) — add the
+// existing library exercise, with the library's spelling, instead of erroring.
 async function createAndAdd(name) {
   name = String(name || '').trim();
   if (!name) return;
-  if (!exercises.includes(name)) {
-    try {
-      await POST('/exercises', { name });
-    } catch (err) {
+  const local = exercises.find(e => sameName(e, name));
+  if (local) { addExerciseToSession(local); return; }
+  try {
+    await POST('/exercises', { name });
+  } catch (err) {
+    if (err.status === 409) {
+      name = (err.body && err.body.name) || name;
+    } else {
       alert(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not create exercise — try again.');
       return;
     }
-    exercises.push(name);
   }
+  if (!exercises.includes(name)) { exercises.push(name); sortExercises(); }
   addExerciseToSession(name);
 }
 

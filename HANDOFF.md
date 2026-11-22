@@ -180,7 +180,7 @@ All `/api/sessions/*` routes now require `Authorization: Bearer <token>`.
 | Method | Path | Body | Notes |
 |--------|------|------|-------|
 | GET | `/api/exercises` | — | Returns `string[]` |
-| POST | `/api/exercises` | `{ name }` | Upserts (ON CONFLICT DO NOTHING) |
+| POST | `/api/exercises` | `{ name }` | → `{ ok, name }`; **409** `{ error, name }` if the name exists ignoring case (`name` = existing library spelling) |
 | DELETE | `/api/exercises/:name` | — | Removes from library |
 
 ### Sessions
@@ -252,3 +252,35 @@ pm2 restart liftlog
 
 Note: `npm test` includes integration tests that write to the DB; they skip
 themselves unless `DATABASE_URL` names a `*_test` database. Never run them on prod.
+
+---
+
+## Case-insensitive exercise names migration (one-time, on the VPS)
+
+Adds a unique index on `lower(exercises.name)` so the shared library can't hold
+"Squat" and "squat" side by side (the API returns 409 for both exact and
+case-variant duplicates). Idempotent, safe to re-run. Back up first.
+
+```bash
+cd /var/work/LiftLog
+git pull
+cd backend
+set -a; . ./.env; set +a
+pg_dump "$DATABASE_URL" -Fc -f ~/liftlog-$(date +%F-%H%M).dump      # backup
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/2026-11-22-exercise-name-ci-unique.sql
+psql "$DATABASE_URL" -c '\d exercises'      # expect idx_exercises_name_lower UNIQUE (lower(name))
+pm2 restart liftlog
+```
+
+### If it fails with "exercises has names that differ only by case"
+The guard aborts before creating anything and lists the clashing names. Find them with:
+
+```sql
+SELECT lower(name) AS key, array_agg(name ORDER BY created_at) AS variants
+  FROM exercises GROUP BY lower(name) HAVING count(*) > 1;
+```
+
+Then, for each group, keep one spelling and rename or delete the others (with the
+owner's say-so — the library is shared). Logged workouts store the name as text
+(`session_exercises.name`), so deleting a library row never touches history.
+Re-run the migration afterwards.

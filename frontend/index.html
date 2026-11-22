@@ -443,6 +443,8 @@ function jsArg(v) { return esc(JSON.stringify(String(v ?? ''))); }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 function showView(name, opts = {}) {
+  // Leaving the exercises page: drop its status/error and any half-done rename.
+  if (currentView === 'manage' && name !== 'manage') { manageMsg(''); manageEditing = null; }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   el('view-' + name).classList.add('active');
   currentView = name;
@@ -1066,7 +1068,7 @@ function addLibraryExercise() { return manageWrite(doAddLibraryExercise); }
 async function doAddLibraryExercise() {
   const input = el('manage-new');
   const name = input.value.trim();
-  if (!name) return;
+  if (!name) { manageMsg(''); return; }
   const dup = exercises.find(e => sameName(e, name));
   if (dup) { manageMsg(`"${dup}" is already in the list`, true); return; }
   try {
@@ -1101,6 +1103,7 @@ function startRename(name) {
 }
 function cancelRename() {
   manageEditing = null;
+  manageMsg('');
   renderManage();
 }
 function saveRename(oldName) { return manageWrite(() => doSaveRename(oldName)); }

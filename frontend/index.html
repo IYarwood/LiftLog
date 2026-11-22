@@ -47,7 +47,7 @@
   #nav {
     position: fixed; top: 0; left: 0; right: 0; z-index: 100;
     background: var(--bg); border-bottom: 1px solid var(--border);
-    padding: calc(var(--safe-top) + 10px) 20px 10px;
+    padding: calc(var(--safe-top) + 4px) 20px 4px;   /* leaves 44px for button hit areas */
     display: flex; align-items: center; gap: 12px; height: calc(var(--safe-top) + 52px);
   }
   .nav-logo { font-family: var(--disp); font-size: 28px; letter-spacing: 3px; color: var(--accent); font-weight: 700; }
@@ -55,7 +55,7 @@
   .nav-btn { background: none; border: none; color: var(--text-d); font-size: 11px; padding: 6px 10px; border-radius: 6px; letter-spacing: 0.5px; }
   .nav-btn.active { color: var(--accent-t); }
   .nav-btn:active { background: var(--surface); }
-  .nav-btn { flex-shrink: 0; white-space: nowrap; }
+  .nav-btn { flex-shrink: 0; white-space: nowrap; min-height: 44px; min-width: 44px; }
   @media (max-width: 400px) {
     #nav { padding-left: 14px; padding-right: 10px; gap: 2px; }
     .nav-logo { font-size: 24px; letter-spacing: 2px; margin-right: 4px; }
@@ -128,24 +128,29 @@
   .flex-fill { flex: 1; min-width: 0; }
   .no-shrink { flex-shrink: 0; }
 
-  .set-headers { display: grid; grid-template-columns: 28px 1fr 1fr 56px 28px; gap: 6px; margin-bottom: 4px; padding: 0 2px; }
+  /* Fixed columns total 136px (same as before), so the inputs keep their width
+     at 320px while save and × get 44px hit areas. */
+  .set-headers { display: grid; grid-template-columns: 20px 1fr 1fr 56px 44px; gap: 4px; margin-bottom: 4px; padding: 0 2px; }
   .set-header-cell { font-size: 9px; color: var(--muted); letter-spacing: 1px; text-align: center; }
-  .set-row { display: grid; grid-template-columns: 28px 1fr 1fr 56px 28px; gap: 6px; margin-bottom: 6px; align-items: center; }
+  .set-row { display: grid; grid-template-columns: 20px 1fr 1fr 56px 44px; gap: 4px; margin-bottom: 6px; align-items: center; }
   .set-num { text-align: center; font-size: 11px; color: var(--muted); }
   .set-num.saved { color: var(--accent-t); }
   .set-input {
     background: var(--card); border: 1px solid var(--border); border-radius: 6px;
     padding: 10px 4px; color: var(--text); font-family: var(--mono); font-size: 16px;
-    text-align: center; width: 100%; transition: border-color 0.15s;
+    text-align: center; width: 100%; min-height: 44px; transition: border-color 0.15s;
   }
   .set-input.saved { background: transparent; border-color: transparent; }
+  .set-input.invalid { border-color: var(--danger) !important; }
+  .set-err { color: var(--danger); font-size: 11px; margin: -2px 0 8px 24px; }
+  .set-err:empty { display: none; }
   .set-save-btn {
     background: var(--accent-dim); border: 1px solid rgba(74,240,176,0.2);
-    border-radius: 5px; color: var(--accent-t); font-size: 10px; padding: 8px 4px; width: 100%;
+    border-radius: 5px; color: var(--accent-t); font-size: 10px; padding: 8px 4px; width: 100%; min-height: 44px;
   }
   .set-save-btn:active { opacity: 0.7; }
   .set-saved-check { text-align: center; font-size: 12px; color: var(--accent-t); }
-  .set-del-btn { background: none; border: none; color: var(--text-f); font-size: 16px; text-align: center; width: 100%; padding: 4px; }
+  .set-del-btn { background: none; border: none; color: var(--text-f); font-size: 18px; text-align: center; width: 100%; min-height: 44px; padding: 4px; }
   .set-del-btn:active { color: var(--danger); }
 
   @keyframes flash { 0%,100% { background: var(--card); } 35% { background: var(--accent-dim); } }
@@ -186,8 +191,11 @@
 
   .ex-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
   .ex-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
-  .ex-del { flex-shrink: 0; background: none; border: none; color: var(--text-f); font-size: 20px; line-height: 1; padding: 2px 6px; min-width: 36px; min-height: 36px; }
+  .ex-del { flex-shrink: 0; background: none; border: none; color: var(--text-f); font-size: 20px; line-height: 1; padding: 2px 6px; min-width: 44px; min-height: 44px; }
   .ex-del:active { color: var(--danger); }
+  /* "already in this workout" — briefly highlight the existing card */
+  @keyframes cardflash { 0%,100% { border-color: var(--border); box-shadow: none; } 25%,60% { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); } }
+  .ex-flash { animation: cardflash 1.6s ease; }
 
   .ex-manage-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); min-height: 52px; }
   .ex-manage-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-d); }
@@ -198,7 +206,7 @@
   }
   .ex-add-row { display: flex; gap: 8px; margin-bottom: 14px; }
   .ex-add-row .search-input { flex: 1; min-width: 0; margin-bottom: 0; }
-  .ex-add-row .mini-btn { height: auto; }
+  .ex-add-row .mini-btn { height: auto; min-height: 44px; min-width: 44px; }
 
   .search-input {
     width: 100%; background: var(--card); border: 1px solid var(--border);
@@ -240,7 +248,7 @@
   .friend-name .sub { display: block; font-size: 10px; color: var(--text-d); margin-top: 2px; }
   .mini-btn {
     flex-shrink: 0; background: none; border: 1px solid var(--border); border-radius: 6px;
-    color: var(--text-d); font-size: 11px; letter-spacing: 0.5px; padding: 0 12px; height: 34px;
+    color: var(--text-d); font-size: 11px; letter-spacing: 0.5px; padding: 0 12px; height: 44px; min-width: 44px;
   }
   .mini-btn.accent { background: var(--accent-dim); border-color: rgba(74,240,176,0.25); color: var(--accent-t); }
   .mini-btn.danger:active { color: var(--danger); border-color: var(--danger); }
@@ -345,7 +353,7 @@
     <div class="text-d" style="margin-bottom:16px;">add, rename or remove — this list is shared by everyone. Past workouts keep the name they were logged with.</div>
     <div class="ex-add-row">
       <input class="search-input" id="manage-new" type="text" maxlength="60" placeholder="new exercise..."
-        autocomplete="off" enterkeyhint="done" onkeydown="if(event.key==='Enter'){addLibraryExercise();}">
+        autocomplete="off" enterkeyhint="done" onkeydown="manageNewKey(event)">
       <button class="mini-btn accent" onclick="addLibraryExercise()">add</button>
     </div>
     <div class="form-msg" id="manage-msg"></div>
@@ -374,7 +382,9 @@
 </div>
 
 <script type="module">
-import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js';
+import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
+import { createSaveQueue } from './js/saveQueue.js?v=dev';
+import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue } from './js/setFields.js?v=dev';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let exercises = [];   // string[]
@@ -418,6 +428,14 @@ function exerciseStats(exName) {
   };
 }
 function el(id) { return document.getElementById(id); }
+// Exercise names match ignoring case everywhere ("Squat" == "squat"): the
+// library, the add sheet, and one-exercise-per-workout. The server compares
+// with lower(), and stores names trimmed.
+const sameName = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+// The active workout's entry for `name` (any casing), or undefined.
+function workoutExercise(name) {
+  return (active?.exercises || []).find(e => sameName(e.name, name));
+}
 // Escape anything user-controlled before it goes into innerHTML. Friends'
 // exercise names / usernames are other people's input, so this matters.
 function esc(v) {
@@ -432,6 +450,8 @@ function jsArg(v) { return esc(JSON.stringify(String(v ?? ''))); }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 function showView(name, opts = {}) {
+  // Leaving the exercises page: drop its status/error and any half-done rename.
+  if (currentView === 'manage' && name !== 'manage') { manageMsg(''); manageEditing = null; }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   el('view-' + name).classList.add('active');
   currentView = name;
@@ -491,27 +511,66 @@ async function startSession() {
   showView('workout');
 }
 
+let finishing = false;   // a second tap while the first is still saving does nothing
 async function finishSession() {
-  if (!active) return;
-  await PATCH(`/sessions/${active.id}/finish`);
-  sessions = [{ ...active, finishedAt: new Date().toISOString() }, ...sessions];
-  active = null;
-  showView('home');
+  if (!active || finishing) return;
+  finishing = true;
+  try {
+    const sess = active;
+    // Out-of-range values are never sent; make the user fix them first.
+    const bad = firstInvalidSet();
+    if (bad) {
+      focusExerciseCard(bad.exId);
+      alert(`Fix the highlighted set value before finishing.\n${SET_LIMITS_MSG}`);
+      return;
+    }
+    // Saves for sets/exercises that no longer exist can't succeed: forget them.
+    setSaves.dropWhere(t => !setExists(t));
+    // Edits typed in the last 600ms are still waiting to be sent: send them
+    // (and wait) before the session is closed, or they'd be lost.
+    if (!(await setSaves.flushAll()) &&
+        !confirm('Some set changes could not be saved. Finish anyway?')) {
+      return;
+    }
+    await PATCH(`/sessions/${sess.id}/finish`);
+    setSaves.dropWhere(t => t.sessionId === sess.id);   // finished: stop retrying
+    sessions = [{ ...sess, finishedAt: new Date().toISOString() }, ...sessions];
+    active = null;
+    showView('home');
+  } finally {
+    finishing = false;
+  }
 }
 
 // ─── Exercise management in session ──────────────────────────────────────────
 // Server caps names at 60 chars (backend/src/validation/exerciseName.js).
 const EXERCISE_NAME_MSG = 'Exercise names must be 1–60 characters.';
+const DOTS_MSG = 'Exercise names can\'t be only dots.';
+// Message for a 400 on a name: the dots rule has its own wording.
+function nameErrorMsg(err) {
+  return err && err.body && /dots/.test(err.body.error || '') ? DOTS_MSG : EXERCISE_NAME_MSG;
+}
 
 async function addExerciseToSession(name) {
   if (!active) return;
   name = String(name || '').trim();   // match what the server stores
+  // Already in this workout (any casing)? Jump to it instead of adding a second card.
+  const existing = workoutExercise(name);
+  if (existing) { closeOverlay(); focusExerciseCard(existing.id); return; }
   const id = uid();
   const position = active.exercises.length;
   try {
     await POST(`/sessions/${active.id}/exercises`, { id, name, position });
   } catch (err) {
-    alert(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not add exercise — try again.');
+    if (err.status === 409 && err.body && err.body.id) {
+      // The server already has it in this workout (added from another tab or
+      // device, or a double tap) — resync and jump to it.
+      await reloadActive();
+      closeOverlay();
+      focusExerciseCard(err.body.id);
+      return;
+    }
+    alert(err.status === 400 ? nameErrorMsg(err) : 'Could not add exercise — try again.');
     return;
   }
   active.exercises.push({ id, name, sets: [] });
@@ -519,8 +578,53 @@ async function addExerciseToSession(name) {
   renderWorkout();
 }
 
+async function reloadActive() {
+  // Send typed-but-unsent set edits first, so the server copy includes them.
+  setSaves.dropWhere(t => !setExists(t));
+  await setSaves.flushAll();
+  try {
+    const fresh = await GET('/sessions/active');
+    if (fresh && active && fresh.id === active.id) {
+      // Anything still unsent (a save failed) stays visible instead of being
+      // replaced by the older server value. So does an invalid value the user
+      // typed (it is never stored, the server holds null): it stays on screen,
+      // red, so FINISH still asks for it to be fixed.
+      const local = new Map();
+      for (const ex of active.exercises) for (const st of ex.sets) local.set(st.id, st);
+      for (const ex of fresh.exercises || []) {
+        for (const st of ex.sets || []) {
+          const f = setSaves.pendingFields(st.id);
+          if (f) for (const [k, v] of Object.entries(f)) st[k] = v ?? '';
+          const old = local.get(st.id);
+          if (old && !st.savedAt) {
+            for (const k of ['reps', 'weight']) if (setFieldError(k, old[k])) st[k] = old[k];
+          }
+        }
+      }
+      active = fresh;
+    }
+  } catch (err) { console.error(err); }
+  renderWorkout();
+}
+
+// Scroll an exercise card into view and flash it.
+function focusExerciseCard(exId) {
+  if (currentView !== 'workout') showView('workout');
+  // Let the sheet close (and the iOS keyboard drop) before measuring.
+  setTimeout(() => {
+    const card = el('excard-' + exId);
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.remove('ex-flash');
+    void card.offsetWidth;            // restart the animation on repeat taps
+    card.classList.add('ex-flash');
+  }, 120);
+}
+
 async function removeExercise(exId) {
   await DELETE(`/sessions/${active.id}/exercises/${exId}`);
+  const gone = active.exercises.find(e => e.id === exId);
+  (gone ? gone.sets : []).forEach(st => setSaves.drop(st.id));
   active.exercises = active.exercises.filter(e => e.id !== exId);
   renderWorkout();
 }
@@ -535,20 +639,58 @@ async function addSet(exId) {
   renderWorkout();
 }
 
-// updateSetField: debounced PATCH — saves as you type
-const debounceTimers = {};
+// updateSetField: debounced PATCH — saves as you type (600ms, see js/saveQueue.js).
+// The target ids are captured now, and setSaves.flushAll() pushes anything
+// pending before the workout is reloaded or finished.
+const setSaves = createSaveQueue(
+  ({ sessionId, exId, setId }, fields) =>
+    PATCH(`/sessions/${sessionId}/exercises/${exId}/sets/${setId}`, fields),
+  600,
+  {
+    // 4xx: never retried. A 404 just means the set/exercise was removed; a
+    // 400 means the server refused a value the checks below should have caught.
+    onRejected(target, fields, err) {
+      console.warn('Set update rejected:', err.status, fields);
+      if (err.status === 400) alert(`A set value was not saved: ${(err.body && err.body.error) || 'invalid value'}.`);
+    },
+  }
+);
+
+// Value limits and messages: js/setFields.js (same limits as the server).
+// Update one row's error state in place (no re-render, so the input keeps focus).
+function showSetErrors(setId, s) {
+  const row = el('setrow-' + setId);
+  if (row) row.querySelectorAll('.set-input').forEach(inp =>
+    inp.classList.toggle('invalid', !!setFieldError(inp.dataset.field, s[inp.dataset.field])));
+  const msg = el('seterr-' + setId);
+  if (msg) msg.textContent = setErrorText(s);
+}
+// First unsaved set in the active workout holding a value that can't be saved.
+function firstInvalidSet() {
+  for (const ex of active?.exercises || []) {
+    for (const s of ex.sets) if (!s.savedAt && setErrorText(s)) return { exId: ex.id, setId: s.id };
+  }
+  return null;
+}
+// Does the save target still exist in the active workout?
+function setExists(t) {
+  return !!active && active.id === t.sessionId &&
+    active.exercises.some(e => e.id === t.exId && e.sets.some(s => s.id === t.setId));
+}
+
 function updateSetField(exId, setId, field, val) {
+  if (!active) return;
   const ex = active.exercises.find(e => e.id === exId);
   if (!ex) return;
   const s = ex.sets.find(s => s.id === setId);
   if (!s) return;
   s[field] = val;
-  // Debounce API call by 600ms so we don't hammer the server on every keystroke
-  clearTimeout(debounceTimers[setId]);
-  debounceTimers[setId] = setTimeout(() => {
-    PATCH(`/sessions/${active.id}/exercises/${exId}/sets/${setId}`, { [field]: val || null })
-      .catch(err => console.error('Set update failed:', err));
-  }, 600);
+  showSetErrors(setId, s);
+  // Always replace this field's queued save. An invalid value is saved as null
+  // (cleared): just skipping it would leave the previous keystroke ("2255" on
+  // the way to "22555") queued or stored. Scheduling also bumps the field's
+  // version, so an older in-flight save that fails is not retried.
+  setSaves.schedule(setId, { sessionId: active.id, exId, setId }, { [field]: fieldSaveValue(field, val) });
 }
 
 async function saveSet(exId, setId) {
@@ -556,19 +698,30 @@ async function saveSet(exId, setId) {
   if (!ex) return;
   const s = ex.sets.find(s => s.id === setId);
   if (!s) return;
-  s.reps = Number(s.reps) || 0;
-  s.weight = Number(s.weight) || 0;
-  s.savedAt = new Date().toISOString();
-  await PATCH(`/sessions/${active.id}/exercises/${exId}/sets/${setId}`, {
-    reps: s.reps,
-    weight: s.weight,
-    savedAt: s.savedAt,
-  });
+  if (setErrorText(s)) { showSetErrors(setId, s); return; }
+  const target = { sessionId: active.id, exId, setId };
+  const vals = { reps: Number(s.reps) || 0, weight: Number(s.weight) || 0, savedAt: new Date().toISOString() };
+  // This PATCH carries every field, so the queued as-you-type save is no longer
+  // needed — but one may already be in flight. Let it land first, so it can't
+  // arrive after (and overwrite) this one.
+  setSaves.drop(setId);
+  await setSaves.flush(setId);
+  try {
+    await PATCH(`/sessions/${target.sessionId}/exercises/${exId}/sets/${setId}`, vals);
+  } catch (err) {
+    // Put the typed values back in the queue so FINISH still sends them.
+    setSaves.schedule(setId, target, { reps: fieldSaveValue('reps', s.reps), weight: fieldSaveValue('weight', s.weight) });
+    alert(err.status === 400 ? `Not saved: ${(err.body && err.body.error) || 'invalid value'}.`
+      : 'Could not save the set — check your connection and try again.');
+    return;
+  }
+  Object.assign(s, vals);
   renderWorkout(setId);
 }
 
 async function removeSet(exId, setId) {
   await DELETE(`/sessions/${active.id}/exercises/${exId}/sets/${setId}`);
+  setSaves.drop(setId);
   const ex = active.exercises.find(e => e.id === exId);
   if (!ex) return;
   ex.sets = ex.sets.filter(s => s.id !== setId);
@@ -643,11 +796,11 @@ function renderWorkout(flashSetId) {
       return `
         <div class="set-row ${flash}" id="setrow-${esc(s.id)}">
           <div class="set-num ${saved ? 'saved' : ''}">${si+1}</div>
-          <input class="set-input ${saved ? 'saved' : ''}" type="number" inputmode="numeric" placeholder="—"
+          <input class="set-input ${saved ? 'saved' : ''} ${!saved && setFieldError('reps', s.reps) ? 'invalid' : ''}" data-field="reps" type="number" inputmode="numeric" placeholder="—"
             value="${esc(s.reps)}" ${saved ? 'readonly' : ''}
             onchange="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'reps',this.value)"
             oninput="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'reps',this.value)">
-          <input class="set-input ${saved ? 'saved' : ''}" type="number" inputmode="decimal" placeholder="—"
+          <input class="set-input ${saved ? 'saved' : ''} ${!saved && setFieldError('weight', s.weight) ? 'invalid' : ''}" data-field="weight" type="number" inputmode="decimal" placeholder="—"
             value="${esc(s.weight)}" ${saved ? 'readonly' : ''}
             onchange="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'weight',this.value)"
             oninput="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'weight',this.value)">
@@ -656,11 +809,12 @@ function renderWorkout(flashSetId) {
             : `<button class="set-save-btn" onclick="saveSet(${jsArg(ex.id)},${jsArg(s.id)})">save</button>`
           }
           <button class="set-del-btn" onclick="removeSet(${jsArg(ex.id)},${jsArg(s.id)})">×</button>
-        </div>`;
+        </div>
+        <div class="set-err" id="seterr-${esc(s.id)}">${saved ? '' : esc(setErrorText(s))}</div>`;
     }).join('');
 
     return `
-      <div class="ex-card">
+      <div class="ex-card" id="excard-${esc(ex.id)}">
         <div class="ex-header">
           <div class="flex-fill">
             <div class="disp-md">${esc(ex.name)}</div>
@@ -980,7 +1134,6 @@ function manageMsg(text, isErr) {
   el('manage-msg').classList.toggle('err', !!isErr);
 }
 function sortExercises() { exercises.sort((a, b) => a.localeCompare(b)); }
-const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
 // One library write at a time, so a double-tap can't send the same request twice.
 let manageBusy = false;
 async function manageWrite(fn) {
@@ -1020,10 +1173,15 @@ function renderManage() {
 }
 
 function addLibraryExercise() { return manageWrite(doAddLibraryExercise); }
+// "new exercise..." box: Enter adds; Escape clears the box and any stale message.
+function manageNewKey(e) {
+  if (e.key === 'Enter') addLibraryExercise();
+  if (e.key === 'Escape') { e.target.value = ''; manageMsg(''); }
+}
 async function doAddLibraryExercise() {
   const input = el('manage-new');
   const name = input.value.trim();
-  if (!name) return;
+  if (!name) { manageMsg(''); return; }
   const dup = exercises.find(e => sameName(e, name));
   if (dup) { manageMsg(`"${dup}" is already in the list`, true); return; }
   try {
@@ -1038,7 +1196,7 @@ async function doAddLibraryExercise() {
       renderManage();
       return;
     }
-    manageMsg(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not add exercise — try again.', true);
+    manageMsg(err.status === 400 ? nameErrorMsg(err) : 'Could not add exercise — try again.', true);
     return;
   }
   if (!exercises.includes(name)) exercises.push(name);
@@ -1058,6 +1216,7 @@ function startRename(name) {
 }
 function cancelRename() {
   manageEditing = null;
+  manageMsg('');
   renderManage();
 }
 function saveRename(oldName) { return manageWrite(() => doSaveRename(oldName)); }
@@ -1073,7 +1232,7 @@ async function doSaveRename(oldName) {
     manageMsg(`renamed to "${res.name}"`);
   } catch (err) {
     if (err.status === 409) { manageMsg('another exercise already has that name', true); return; }
-    if (err.status === 400) { manageMsg(EXERCISE_NAME_MSG, true); return; }
+    if (err.status === 400) { manageMsg(nameErrorMsg(err), true); return; }
     if (err.status === 404) {
       manageMsg('that exercise was removed or renamed by someone else — list refreshed', true);
       manageEditing = null;
@@ -1119,8 +1278,21 @@ function openOverlay() {
     fitOverlayToViewport();
   }
   setTimeout(() => el('ex-filter').focus(), 100);
+  refreshOverlayLibrary();
+}
+// The library is shared: show the cached list at once, then pick up other
+// people's adds/renames in the background. Only re-render if it changed, so
+// the list doesn't flicker under a finger.
+async function refreshOverlayLibrary() {
+  let fresh;
+  try { fresh = await GET('/exercises'); } catch (err) { console.error(err); return; }
+  if (!Array.isArray(fresh)) return;
+  const changed = JSON.stringify(fresh) !== JSON.stringify(exercises);
+  exercises = fresh;
+  if (changed && el('overlay').classList.contains('open')) renderOverlay();
 }
 function closeOverlay() {
+  el('ex-filter').blur();   // drop the iOS keyboard
   el('overlay').classList.remove('open');
   if (window.visualViewport) {
     visualViewport.removeEventListener('resize', fitOverlayToViewport);
@@ -1134,7 +1306,6 @@ function overlayBgClick(e) { if (e.target === el('overlay')) closeOverlay(); }
 function renderOverlay() {
   const filter = el('ex-filter').value.trim();
   const filtered = exercises.filter(e => e.toLowerCase().includes(filter.toLowerCase()));
-  const alreadyAdded = new Set((active?.exercises||[]).map(e=>e.name));
 
   const createBtn = el('create-btn-container');
   if (filter && !exercises.some(e => e.toLowerCase() === filter.toLowerCase())) {
@@ -1145,7 +1316,7 @@ function renderOverlay() {
 
   el('ex-list').innerHTML = filtered.map(name => `
     <button class="ex-pick-btn" data-name="${esc(name)}">
-      ${esc(name)}${alreadyAdded.has(name) ? ' <span style="color:var(--accent-t); font-size:10px;">✓ added</span>' : ''}
+      ${esc(name)}${workoutExercise(name) ? ' <span style="color:var(--accent-t); font-size:10px;">✓ added</span>' : ''}
     </button>
   `).join('');
 }
@@ -1156,6 +1327,7 @@ function renderOverlay() {
 async function createAndAdd(name) {
   name = String(name || '').trim();
   if (!name) return;
+  if (workoutExercise(name)) { addExerciseToSession(name); return; }   // jumps to it
   const local = exercises.find(e => sameName(e, name));
   if (local) { addExerciseToSession(local); return; }
   try {
@@ -1164,7 +1336,7 @@ async function createAndAdd(name) {
     if (err.status === 409) {
       name = (err.body && err.body.name) || name;
     } else {
-      alert(err.status === 400 ? EXERCISE_NAME_MSG : 'Could not create exercise — try again.');
+      alert(err.status === 400 ? nameErrorMsg(err) : 'Could not create exercise — try again.');
       return;
     }
   }
@@ -1202,7 +1374,7 @@ Object.assign(window, {
   removeExercise,
   addSet, saveSet, removeSet, updateSetField,
   openOverlay, renderOverlay, overlayBgClick, openDetail, renderManage,
-  openManage, addLibraryExercise,
+  openManage, addLibraryExercise, manageNewKey,
   logout,
   onFriendSearch, sendRequest, acceptRequest, declineRequest, cancelRequest, removeFriend,
   openFriendHistory, loadMoreFriendHistory, openFhItem, loadMoreFeed, openFeedItem,

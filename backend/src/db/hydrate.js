@@ -1,5 +1,12 @@
 const pool = require('./pool');
 
+// sets.weight is NUMERIC(6,2), which node-postgres returns as a string
+// ("225.00"). Send it as a JSON number (225, 225.5, 102.25) so every client
+// view shows it without trailing zeros. null stays null.
+function toWeight(w) {
+  return w === null || w === undefined ? null : Number(w);
+}
+
 // Hydrate many already-fetched session rows (exercises + sets) in two queries
 // total, instead of one round-trip per session/exercise. Output shape matches
 // hydrateSession() in routes/sessions.js, plus `username` when the row has one.
@@ -8,13 +15,13 @@ async function hydrateSessions(rows) {
   const ids = rows.map(r => r.id);
 
   const exRes = await pool.query(
-    'SELECT * FROM session_exercises WHERE session_id = ANY($1) ORDER BY position ASC, created_at ASC',
+    'SELECT * FROM session_exercises WHERE session_id = ANY($1) ORDER BY position ASC, created_at ASC, id ASC',
     [ids]
   );
   const exIds = exRes.rows.map(e => e.id);
   const setRes = exIds.length
     ? await pool.query(
-        'SELECT * FROM sets WHERE session_exercise_id = ANY($1) ORDER BY position ASC, created_at ASC',
+        'SELECT * FROM sets WHERE session_exercise_id = ANY($1) ORDER BY position ASC, created_at ASC, id ASC',
         [exIds]
       )
     : { rows: [] };
@@ -25,7 +32,7 @@ async function hydrateSessions(rows) {
     setsByEx.get(s.session_exercise_id).push({
       id: s.id,
       reps: s.reps,
-      weight: s.weight,
+      weight: toWeight(s.weight),
       savedAt: s.saved_at,
     });
   }
@@ -51,4 +58,4 @@ async function hydrateSessions(rows) {
   });
 }
 
-module.exports = { hydrateSessions };
+module.exports = { hydrateSessions, toWeight };

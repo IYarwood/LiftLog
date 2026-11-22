@@ -13,6 +13,9 @@ function parseExerciseName(raw) {
   if (name.length > MAX_EXERCISE_NAME_LENGTH) {
     return { error: `name must be at most ${MAX_EXERCISE_NAME_LENGTH} characters` };
   }
+  // "." and ".." (and any all-dots name) can't be addressed as
+  // /api/exercises/:name — URL normalisation turns them into path segments.
+  if (/^\.+$/.test(name)) return { error: 'name cannot be only dots' };
   return { name };
 }
 

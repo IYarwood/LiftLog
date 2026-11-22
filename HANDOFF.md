@@ -96,7 +96,15 @@ cd /var/work/LiftLog
 ./deploy.sh
 ```
 
-`deploy.sh` does: `git pull` → `npm install` → `pm2 restart liftlog`
+`deploy.sh` does: un-stamp asset versions → `git pull` → `stamp-assets.sh` → `npm install` → `pm2 restart liftlog`
+
+### Frontend cache-busting
+`index.html`, `login.html` and `js/auth.js` reference `api.js` / `auth.js` /
+`auth.css` with `?v=dev`. `stamp-assets.sh` (run by `deploy.sh`) rewrites that
+to `?v=<git short SHA>` so Safari fetches fresh copies after every deploy.
+After a deploy those three files show as modified in `git status` — expected;
+`deploy.sh` resets them before the next pull. A new script/stylesheet/import
+should use `?v=dev` and be listed in `stamp-assets.sh`.
 
 ---
 
@@ -191,10 +199,10 @@ All `/api/sessions/*` routes now require `Authorization: Bearer <token>`.
 | GET | `/api/sessions/:id` | — | Single session, full shape |
 | POST | `/api/sessions` | `{ id, startedAt }` | Start session |
 | PATCH | `/api/sessions/:id/finish` | — | Sets finished_at = NOW() |
-| POST | `/api/sessions/:id/exercises` | `{ id, name, position }` | Add exercise to session |
+| POST | `/api/sessions/:id/exercises` | `{ id, name }` | Add exercise to session. Position = last + 1 (server-assigned; a sent `position` is ignored). **409** `{ error, id, name }` if the session already has that name ignoring case; re-sending the same `{ id, name }` is a 200 no-op |
 | DELETE | `/api/sessions/:id/exercises/:exId` | — | Remove exercise |
-| POST | `/api/sessions/:id/exercises/:exId/sets` | `{ id, position }` | Add empty set |
-| PATCH | `/api/sessions/:id/exercises/:exId/sets/:setId` | `{ reps?, weight?, savedAt? }` | Update set fields |
+| POST | `/api/sessions/:id/exercises/:exId/sets` | `{ id }` | Add empty set. Position = last + 1 (server-assigned) |
+| PATCH | `/api/sessions/:id/exercises/:exId/sets/:setId` | `{ reps?, weight?, savedAt? }` | Update set fields. Omitted field = unchanged; `null` (or `''`) = clear. reps 0–9999 whole, weight 0–9999.99, else **400** |
 | DELETE | `/api/sessions/:id/exercises/:exId/sets/:setId` | — | Remove set |
 
 ### Session shape returned by API
@@ -219,7 +227,7 @@ All `/api/sessions/*` routes now require `Authorization: Bearer <token>`.
 
 ## Known gotchas
 - `GET /api/sessions/active` must be registered BEFORE `GET /api/sessions/:id` in the router — already handled correctly in `sessions.js`.
-- `updateSetField` debounces API calls by 600ms to avoid hammering the server on every keystroke — intentional.
+- `updateSetField` debounces API calls by 600ms to avoid hammering the server on every keystroke — intentional. The queue lives in `frontend/js/saveQueue.js`: it captures the target ids at edit time and merges a set's fields. `finishSession` and `reloadActive` await `setSaves.flushAll()` first, so nothing typed just before FINISH is lost.
 - Exercise names can contain spaces/apostrophes. DELETE uses `:name` as a URL param — `encodeURIComponent` on frontend (done), `req.params.name` in query (done).
 - `exerciseStats` computes PR/avg from the in-memory `sessions` array. Stats for the active session won't include the current workout — by design.
 

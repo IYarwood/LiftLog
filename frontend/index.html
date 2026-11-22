@@ -699,16 +699,23 @@ async function saveSet(exId, setId) {
   const s = ex.sets.find(s => s.id === setId);
   if (!s) return;
   if (setErrorText(s)) { showSetErrors(setId, s); return; }
+  const target = { sessionId: active.id, exId, setId };
   const vals = { reps: Number(s.reps) || 0, weight: Number(s.weight) || 0, savedAt: new Date().toISOString() };
+  // This PATCH carries every field, so the queued as-you-type save is no longer
+  // needed — but one may already be in flight. Let it land first, so it can't
+  // arrive after (and overwrite) this one.
+  setSaves.drop(setId);
+  await setSaves.flush(setId);
   try {
-    await PATCH(`/sessions/${active.id}/exercises/${exId}/sets/${setId}`, vals);
+    await PATCH(`/sessions/${target.sessionId}/exercises/${exId}/sets/${setId}`, vals);
   } catch (err) {
+    // Put the typed values back in the queue so FINISH still sends them.
+    setSaves.schedule(setId, target, { reps: fieldSaveValue('reps', s.reps), weight: fieldSaveValue('weight', s.weight) });
     alert(err.status === 400 ? `Not saved: ${(err.body && err.body.error) || 'invalid value'}.`
       : 'Could not save the set — check your connection and try again.');
     return;
   }
   Object.assign(s, vals);
-  setSaves.drop(setId);   // this PATCH carried every field
   renderWorkout(setId);
 }
 

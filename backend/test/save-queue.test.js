@@ -273,3 +273,26 @@ test('a failure while a newer edit is still queued: the newer value wins, in the
   assert.strictEqual(q.size, 0);
   assert.deepStrictEqual(server, [{ reps: '55' }]);
 });
+
+// ─── saveSet ordering (review round 4) ────────────────────────────────────────
+// saveSet does: drop(setId); await flush(setId); then its own PATCH.
+test('drop + flush waits for the in-flight save, so a following direct save lands last', async () => {
+  const { createSaveQueue } = await load();
+  const server = [];
+  const q = createSaveQueue(async (t, f) => { await sleep(50); server.push(f); }, 5);
+  q.schedule('s1', { setId: 's1' }, { reps: '5' });
+  await sleep(15);                               // debounced save in flight (slow)
+  q.schedule('s1', { setId: 's1' }, { reps: '6' });   // still queued
+  q.drop('s1');                                  // Save button pressed
+  await q.flush('s1');                           // waits for the in-flight one only
+  server.push({ reps: 6, savedAt: 'now' });      // saveSet's own PATCH
+  await sleep(80);
+  assert.deepStrictEqual(server, [{ reps: '5' }, { reps: 6, savedAt: 'now' }]);
+  assert.strictEqual(q.size, 0);                 // the queued "6" was dropped, not sent
+});
+
+test('flush on a key with nothing pending or in flight resolves immediately', async () => {
+  const { createSaveQueue } = await load();
+  const q = createSaveQueue(async () => {}, 600);
+  await q.flush('nothing');
+});

@@ -1178,7 +1178,6 @@ function overlayBgClick(e) { if (e.target === el('overlay')) closeOverlay(); }
 function renderOverlay() {
   const filter = el('ex-filter').value.trim();
   const filtered = exercises.filter(e => e.toLowerCase().includes(filter.toLowerCase()));
-  const alreadyAdded = new Set((active?.exercises||[]).map(e=>e.name));
 
   const createBtn = el('create-btn-container');
   if (filter && !exercises.some(e => e.toLowerCase() === filter.toLowerCase())) {
@@ -1189,7 +1188,7 @@ function renderOverlay() {
 
   el('ex-list').innerHTML = filtered.map(name => `
     <button class="ex-pick-btn" data-name="${esc(name)}">
-      ${esc(name)}${alreadyAdded.has(name) ? ' <span style="color:var(--accent-t); font-size:10px;">✓ added</span>' : ''}
+      ${esc(name)}${workoutExercise(name) ? ' <span style="color:var(--accent-t); font-size:10px;">✓ added</span>' : ''}
     </button>
   `).join('');
 }

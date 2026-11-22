@@ -202,7 +202,7 @@ All `/api/sessions/*` routes now require `Authorization: Bearer <token>`.
 | POST | `/api/sessions/:id/exercises` | `{ id, name }` | Add exercise to session. Position = last + 1 (server-assigned; a sent `position` is ignored). **409** `{ error, id, name }` if the session already has that name ignoring case; re-sending the same `{ id, name }` is a 200 no-op |
 | DELETE | `/api/sessions/:id/exercises/:exId` | — | Remove exercise |
 | POST | `/api/sessions/:id/exercises/:exId/sets` | `{ id }` | Add empty set. Position = last + 1 (server-assigned) |
-| PATCH | `/api/sessions/:id/exercises/:exId/sets/:setId` | `{ reps?, weight?, savedAt? }` | Update set fields |
+| PATCH | `/api/sessions/:id/exercises/:exId/sets/:setId` | `{ reps?, weight?, savedAt? }` | Update set fields. Omitted field = unchanged; `null` (or `''`) = clear. reps 0–9999 whole, weight 0–9999.99, else **400** |
 | DELETE | `/api/sessions/:id/exercises/:exId/sets/:setId` | — | Remove set |
 
 ### Session shape returned by API

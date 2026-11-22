@@ -256,24 +256,32 @@ router.post('/:id/exercises/:exId/sets', async (req, res) => {
 });
 
 // PATCH /api/sessions/:id/exercises/:exId/sets/:setId — update set fields
-// body: { reps?: number, weight?: number, savedAt?: string }
-// reps: whole number 0–9999; weight: 0–9999.99 (NUMERIC(6,2)); numeric strings
-// are accepted; absent/null/'' leaves a field unchanged. Out-of-range or
-// malformed values are a 400 (see validation/setFields.js).
+// body: { reps?: number|null, weight?: number|null, savedAt?: string }
+// Only fields present in the body change: an omitted field keeps its value,
+// an explicit null (or '') clears it. reps: whole number 0–9999; weight:
+// 0–9999.99 (NUMERIC(6,2)); numeric strings are accepted. savedAt can be set
+// but not cleared. Out-of-range or malformed values are a 400
+// (see validation/setFields.js).
 router.patch('/:id/exercises/:exId/sets/:setId', async (req, res) => {
-  const { reps, weight, savedAt, error } = parseSetFields(req.body);
+  const { fields, error } = parseSetFields(req.body);
   if (error) return res.status(400).json({ error });
+  const has = (k) => Object.prototype.hasOwnProperty.call(fields, k);
   try {
     if (!(await ownsSessionExercise(req.params.id, req.params.exId, req.userId))) {
       return res.status(404).json({ error: 'Not found' });
     }
+    // $1/$3 say whether reps/weight were sent; if so, $2/$4 (possibly null)
+    // replace the stored value.
     await pool.query(
       `UPDATE sets SET
-         reps = COALESCE($1, reps),
-         weight = COALESCE($2, weight),
-         saved_at = COALESCE($3, saved_at)
-       WHERE id = $4 AND session_exercise_id = $5`,
-      [reps, weight, savedAt, req.params.setId, req.params.exId]
+         reps     = CASE WHEN $1::boolean THEN $2::integer ELSE reps END,
+         weight   = CASE WHEN $3::boolean THEN $4::numeric ELSE weight END,
+         saved_at = COALESCE($5::timestamptz, saved_at)
+       WHERE id = $6 AND session_exercise_id = $7`,
+      [has('reps'), has('reps') ? fields.reps : null,
+       has('weight'), has('weight') ? fields.weight : null,
+       has('savedAt') ? fields.savedAt : null,
+       req.params.setId, req.params.exId]
     );
     res.json({ ok: true });
   } catch (err) {

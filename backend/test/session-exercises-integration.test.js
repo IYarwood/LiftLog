@@ -197,10 +197,29 @@ describe('session exercises (integration, real test DB)', { skip }, () => {
     assert.strictEqual((await patch({ reps: 5, weight: 9999.99 })).status, 200);
     assert.strictEqual((await patch({ weight: 12345 })).status, 400);
     assert.strictEqual((await patch({ reps: 1.5 })).status, 400);
-    assert.strictEqual((await patch({ reps: '7', weight: '' })).status, 200);   // blank = unchanged
+    assert.strictEqual((await patch({ reps: '7' })).status, 200);   // weight omitted = unchanged
     const [set] = (await getSession(sid)).exercises[0].sets;
     assert.strictEqual(set.reps, 7);
     assert.strictEqual(set.weight, 9999.99);
+  });
+
+  test('PATCH set: explicit null clears a field, an omitted field is kept', async () => {
+    const sid = await newSession();
+    await addEx(sid, ID('n1'), 'Shrug');
+    const base = `/api/sessions/${sid}/exercises/${ID('n1')}/sets`;
+    await authed(request(app).post(base)).send({ id: ID('ns') });
+    const patch = (body) => authed(request(app).patch(`${base}/${ID('ns')}`)).send(body);
+    const set = async () => (await getSession(sid)).exercises[0].sets[0];
+
+    assert.strictEqual((await patch({ reps: 8, weight: 1234 })).status, 200);
+    assert.strictEqual((await patch({ reps: 9 })).status, 200);               // weight omitted
+    assert.deepStrictEqual([(await set()).reps, (await set()).weight], [9, 1234]);
+    assert.strictEqual((await patch({ weight: null })).status, 200);          // clear weight only
+    assert.deepStrictEqual([(await set()).reps, (await set()).weight], [9, null]);
+    assert.strictEqual((await patch({ reps: '' })).status, 200);              // blank input clears too
+    assert.deepStrictEqual([(await set()).reps, (await set()).weight], [null, null]);
+    assert.strictEqual((await patch({})).status, 200);                        // nothing to change
+    assert.deepStrictEqual([(await set()).reps, (await set()).weight], [null, null]);
   });
 
   test("another user's session → 404", async () => {

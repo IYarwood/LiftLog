@@ -122,3 +122,52 @@ test('POST /api/sessions/:id/exercises without a token is 401', async () => {
   assert.strictEqual(res.status, 401);
   assert.strictEqual(q.mock.callCount(), 0);
 });
+
+// ─── Transaction cleanup in POST /api/sessions/:id/exercises ──────────────────
+// A client whose queries fail as configured; records what release() got.
+function mockFailingClient({ failOn, rollbackFails }) {
+  const released = [];
+  const client = {
+    query: async (sql) => {
+      if (sql === 'ROLLBACK' && rollbackFails) throw new Error('connection lost');
+      if (failOn.test(sql)) throw new Error('boom');
+      if (/FROM sessions/.test(sql)) return { rows: [{ '?column?': 1 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    release: (err) => released.push(err),
+  };
+  mock.method(pool, 'connect', async () => client);
+  mock.method(console, 'error', () => {});
+  return released;
+}
+
+test('POST session exercise: failed insert rolls back and returns the client to the pool', async () => {
+  const released = mockFailingClient({ failOn: /INSERT/, rollbackFails: false });
+  const res = await auth(request(app).post('/api/sessions/s1/exercises')).send({ id: 'ex1', name: 'Squat' });
+  assert.strictEqual(res.status, 500);
+  assert.deepStrictEqual(released, [undefined]);
+});
+
+test('POST session exercise: if ROLLBACK also fails, the client is released with the error (destroyed)', async () => {
+  const released = mockFailingClient({ failOn: /INSERT/, rollbackFails: true });
+  const res = await auth(request(app).post('/api/sessions/s1/exercises')).send({ id: 'ex1', name: 'Squat' });
+  assert.strictEqual(res.status, 500);
+  assert.strictEqual(released.length, 1);
+  assert.ok(released[0] instanceof Error);
+});
+
+test('POST session exercise: a failing ROLLBACK on the 404 path is a 500 and destroys the client', async () => {
+  const released = [];
+  const client = {
+    query: async (sql) => {
+      if (sql === 'ROLLBACK') throw new Error('connection lost');
+      return { rows: [], rowCount: 0 };   // ownership check finds nothing → 404 path
+    },
+    release: (err) => released.push(err),
+  };
+  mock.method(pool, 'connect', async () => client);
+  mock.method(console, 'error', () => {});
+  const res = await auth(request(app).post('/api/sessions/s1/exercises')).send({ id: 'ex1', name: 'Squat' });
+  assert.strictEqual(res.status, 500);
+  assert.ok(released[0] instanceof Error);
+});

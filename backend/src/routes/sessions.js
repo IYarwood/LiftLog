@@ -160,6 +160,7 @@ router.post('/:id/exercises', async (req, res) => {
   const { name, error } = parseExerciseName(req.body.name);
   if (error) return res.status(400).json({ error });
   let client;
+  let brokenErr;   // set if ROLLBACK itself failed: the connection is unusable
   try {
     client = await pool.connect();
     await client.query('BEGIN');
@@ -199,11 +200,15 @@ router.post('/:id/exercises', async (req, res) => {
     await client.query('COMMIT');
     res.json({ ok: true, id });
   } catch (err) {
-    if (client) await client.query('ROLLBACK').catch(() => {});
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (rbErr) { brokenErr = rbErr; }
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to add exercise' });
   } finally {
-    if (client) client.release();
+    // release(err) destroys the connection instead of returning it to the pool
+    // (it could still be mid-transaction).
+    if (client) client.release(brokenErr);
   }
 });
 

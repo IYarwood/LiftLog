@@ -384,6 +384,7 @@
 <script type="module">
 import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
 import { createSaveQueue } from './js/saveQueue.js?v=dev';
+import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue } from './js/setFields.js?v=dev';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let exercises = [];   // string[]
@@ -585,11 +586,19 @@ async function reloadActive() {
     const fresh = await GET('/sessions/active');
     if (fresh && active && fresh.id === active.id) {
       // Anything still unsent (a save failed) stays visible instead of being
-      // replaced by the older server value.
+      // replaced by the older server value. So does an invalid value the user
+      // typed (it is never stored, the server holds null): it stays on screen,
+      // red, so FINISH still asks for it to be fixed.
+      const local = new Map();
+      for (const ex of active.exercises) for (const st of ex.sets) local.set(st.id, st);
       for (const ex of fresh.exercises || []) {
         for (const st of ex.sets || []) {
           const f = setSaves.pendingFields(st.id);
           if (f) for (const [k, v] of Object.entries(f)) st[k] = v ?? '';
+          const old = local.get(st.id);
+          if (old && !st.savedAt) {
+            for (const k of ['reps', 'weight']) if (setFieldError(k, old[k])) st[k] = old[k];
+          }
         }
       }
       active = fresh;
@@ -647,23 +656,7 @@ const setSaves = createSaveQueue(
   }
 );
 
-// Same limits as the server (backend/src/validation/setFields.js): sets.reps is
-// an INTEGER, sets.weight is NUMERIC(6,2).
-const MAX_REPS = 9999, MAX_WEIGHT = 9999.99;
-const SET_LIMITS_MSG = `Reps: whole number 0–${MAX_REPS}. Weight: 0–${MAX_WEIGHT} lb.`;
-// '' if `val` is OK for `field` (blank is OK: it means "not entered yet").
-function setFieldError(field, val) {
-  if (val === '' || val === null || val === undefined) return '';
-  const n = Number(val);
-  if (field === 'reps') {
-    return Number.isInteger(n) && n >= 0 && n <= MAX_REPS ? '' : `Reps must be a whole number from 0 to ${MAX_REPS}.`;
-  }
-  const r = Math.round(n * 100) / 100;
-  return Number.isFinite(n) && r >= 0 && r <= MAX_WEIGHT ? '' : `Weight must be from 0 to ${MAX_WEIGHT} lb.`;
-}
-function setErrorText(s) {
-  return [setFieldError('reps', s.reps), setFieldError('weight', s.weight)].filter(Boolean).join(' ');
-}
+// Value limits and messages: js/setFields.js (same limits as the server).
 // Update one row's error state in place (no re-render, so the input keeps focus).
 function showSetErrors(setId, s) {
   const row = el('setrow-' + setId);
@@ -693,8 +686,11 @@ function updateSetField(exId, setId, field, val) {
   if (!s) return;
   s[field] = val;
   showSetErrors(setId, s);
-  if (setFieldError(field, val)) return;   // never send a value the server will refuse
-  setSaves.schedule(setId, { sessionId: active.id, exId, setId }, { [field]: val || null });
+  // Always replace this field's queued save. An invalid value is saved as null
+  // (cleared): just skipping it would leave the previous keystroke ("2255" on
+  // the way to "22555") queued or stored. Scheduling also bumps the field's
+  // version, so an older in-flight save that fails is not retried.
+  setSaves.schedule(setId, { sessionId: active.id, exId, setId }, { [field]: fieldSaveValue(field, val) });
 }
 
 async function saveSet(exId, setId) {

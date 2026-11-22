@@ -1,0 +1,39 @@
+// Client-side rules for set values (browser ES module, no dependencies; also
+// imported by backend/test/set-fields-client.test.js).
+// Same limits as the server (backend/src/validation/setFields.js): sets.reps is
+// an INTEGER, sets.weight is NUMERIC(6,2).
+
+export const MAX_REPS = 9999;
+export const MAX_WEIGHT = 9999.99;
+export const SET_LIMITS_MSG = `Reps: whole number 0–${MAX_REPS}. Weight: 0–${MAX_WEIGHT} lb.`;
+
+const isBlank = (val) => val === '' || val === null || val === undefined;
+
+// '' if `val` is OK for `field` (blank is OK: it means "not entered yet"),
+// otherwise a message for the user.
+export function setFieldError(field, val) {
+  if (isBlank(val)) return '';
+  const n = Number(val);
+  if (field === 'reps') {
+    return Number.isInteger(n) && n >= 0 && n <= MAX_REPS ? '' : `Reps must be a whole number from 0 to ${MAX_REPS}.`;
+  }
+  const r = Math.round(n * 100) / 100;
+  return Number.isFinite(n) && r >= 0 && r <= MAX_WEIGHT ? '' : `Weight must be from 0 to ${MAX_WEIGHT} lb.`;
+}
+
+// All of a set's errors as one line ('' if none).
+export function setErrorText(s) {
+  return [setFieldError('reps', s.reps), setFieldError('weight', s.weight)].filter(Boolean).join(' ');
+}
+
+// What to save for a field the user just changed:
+//   valid value → that value;
+//   blank       → null (clears it on the server);
+//   invalid     → null as well. The value on screen can't be stored, so the
+//                 field is cleared rather than left holding an earlier keystroke
+//                 (typing "22555" must not leave "2255" queued or stored). The
+//                 field stays red and FINISH refuses until it's fixed.
+export function fieldSaveValue(field, val) {
+  if (isBlank(val) || setFieldError(field, val)) return null;
+  return val;
+}

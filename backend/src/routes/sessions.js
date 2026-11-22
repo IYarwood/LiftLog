@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const pool = require('../db/pool');
 const { parseExerciseName } = require('../validation/exerciseName');
+const { toWeight } = require('../db/hydrate');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ async function hydrateSession(sess) {
       sets: setRes.rows.map(s => ({
         id: s.id,
         reps: s.reps,
-        weight: s.weight,
+        weight: toWeight(s.weight),
         savedAt: s.saved_at,
       })),
     };

@@ -118,6 +118,26 @@ describe('session exercises (integration, real test DB)', { skip }, () => {
     assert.strictEqual((await getSession(sid)).exercises.length, 1);
   });
 
+  test('weights come back as numbers without trailing zeros', async () => {
+    const sid = await newSession();
+    assert.strictEqual((await addEx(sid, ID('w1'), 'Press')).status, 200);
+    const weights = [225, 225.5, 102.25, null];
+    for (const [i, w] of weights.entries()) {
+      const setId = ID('ws' + i);
+      await authed(request(app).post(`/api/sessions/${sid}/exercises/${ID('w1')}/sets`)).send({ id: setId, position: i });
+      if (w !== null) {
+        await authed(request(app).patch(`/api/sessions/${sid}/exercises/${ID('w1')}/sets/${setId}`)).send({ reps: 5, weight: w });
+      }
+    }
+    const sess = await getSession(sid);
+    assert.deepStrictEqual(sess.exercises[0].sets.map(s => s.weight), weights);
+    // Same shape from the shared hydrator used by the feed and friend history
+    const { hydrateSessions } = require('../src/db/hydrate');
+    const row = (await pool.query('SELECT * FROM sessions WHERE id = $1', [sid])).rows[0];
+    const [h] = await hydrateSessions([row]);
+    assert.deepStrictEqual(h.exercises[0].sets.map(s => s.weight), weights);
+  });
+
   test("another user's session → 404", async () => {
     const other = await pool.query(
       "INSERT INTO users (username, password_hash) VALUES ($1, 'x') RETURNING id", [`zzsx_other_${tag}`]

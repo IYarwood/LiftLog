@@ -21,7 +21,8 @@ const app = require('../src/app');
 const { signToken } = require('../src/auth/tokens');
 
 const tag = Math.random().toString(36).slice(2, 8);
-const N = (s) => `zzex_${tag}_${s}`;
+// Starts with a capital so Title Casing (validation/exerciseName.js) leaves it as typed.
+const N = (s) => `Zzex_${tag}_${s}`;
 let token, userId;
 const sessId = `zzex_${tag}_sess`;
 

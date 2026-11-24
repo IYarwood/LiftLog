@@ -28,7 +28,8 @@ const MIGRATION = fs.readFileSync(
 );
 
 const tag = Math.random().toString(36).slice(2, 8);
-const N = (s) => `zzdup_${tag}_${s}`;
+// Starts with a capital so Title Casing (validation/exerciseName.js) leaves it as typed.
+const N = (s) => `Zzdup_${tag}_${s}`;
 let token;
 
 const add = (name) => request(app)
@@ -144,6 +145,24 @@ describe('case-insensitive exercise names (integration, real test DB)', { skip }
     assert.strictEqual(res.body.name, N('BENCH'));
     const names = await libNames();
     assert.ok(names.includes(N('BENCH')) && !names.includes(N('Bench')));
+  });
+
+  test('new and renamed names are Title Cased; case variants still 409', async () => {
+    const res = await add(`  ${N('leg   curl').toLowerCase()} `);
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.body, { ok: true, name: N('leg Curl') });
+    const dup = await add(N('LEG CURL'));
+    assert.strictEqual(dup.status, 409);
+    assert.strictEqual(dup.body.name, N('leg Curl'));
+
+    await add(N('tcsrc'));
+    const ren = await rename(N('tcsrc'), N('ez bar-curl'));
+    assert.strictEqual(ren.status, 200);
+    assert.strictEqual(ren.body.name, N('ez Bar-Curl'));
+    const names = await libNames();
+    assert.ok(names.includes(N('ez Bar-Curl')) && names.includes(N('leg Curl')), names.join());
+    // renaming into a lowercase spelling of another exercise is still a 409
+    assert.strictEqual((await rename(N('ez Bar-Curl'), N('leg curl'))).status, 409);
   });
 
   test('the migration is idempotent (re-running it is a no-op)', async () => {

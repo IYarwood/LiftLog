@@ -19,12 +19,47 @@ test('exercise name cap is 60', () => {
 
 test('parseExerciseName trims and enforces 1–60 chars', () => {
   assert.deepStrictEqual(parseExerciseName('  Squat  '), { name: 'Squat' });
-  assert.deepStrictEqual(parseExerciseName('x'.repeat(60)), { name: 'x'.repeat(60) });
+  assert.deepStrictEqual(parseExerciseName('X'.repeat(60)), { name: 'X'.repeat(60) });
   assert.ok(parseExerciseName('x'.repeat(61)).error);
   assert.ok(parseExerciseName('   ').error);
   assert.ok(parseExerciseName(undefined).error);
   assert.ok(parseExerciseName(42).error);
   assert.ok(parseExerciseName(['Squat']).error);
+});
+
+test('parseExerciseName Title Cases names without lowercasing typed capitals', () => {
+  for (const [input, want] of [
+    ['leg curl', 'Leg Curl'],
+    ['lying leg curl', 'Lying Leg Curl'],
+    ['push-ups', 'Push-Ups'],
+    ['single-leg RDL', 'Single-Leg RDL'],
+    ['RDL', 'RDL'],
+    ['EZ bar curl', 'EZ Bar Curl'],
+    ['McGill big 3', 'McGill Big 3'],
+    ['straight arm pulldown', 'Straight Arm Pulldown'],
+    ['Straight Arm Pulldown', 'Straight Arm Pulldown'],
+    ["farmer's walk", "Farmer's Walk"],
+    ['curl (cable)', 'Curl (Cable)'],
+    ['3x5 squat', '3x5 Squat'],
+    ['éclair press', 'Éclair Press'],
+  ]) {
+    assert.deepStrictEqual(parseExerciseName(input), { name: want }, input);
+  }
+});
+
+test('parseExerciseName collapses repeated internal whitespace', () => {
+  assert.deepStrictEqual(parseExerciseName('  leg    curl  '), { name: 'Leg Curl' });
+  assert.deepStrictEqual(parseExerciseName('leg \t curl'), { name: 'Leg Curl' });
+  assert.deepStrictEqual(parseExerciseName('push -  ups'), { name: 'Push - Ups' });
+});
+
+test('POST /api/sessions/:id/exercises stores and returns the Title Cased name', async () => {
+  const { insert } = mockOwnedSession();
+  const res = await auth(request(app).post('/api/sessions/s1/exercises'))
+    .send({ id: 'ex1', name: ' leg  curl ', position: 0 });
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body, { ok: true, id: 'ex1', name: 'Leg Curl' });
+  assert.strictEqual(insert().params[2], 'Leg Curl');
 });
 
 test('parseExerciseName rejects names made only of dots', () => {
@@ -90,7 +125,7 @@ test('POST /api/sessions/:id/exercises trims the name before inserting', async (
 
 test('POST /api/sessions/:id/exercises accepts exactly 60 chars (padding trimmed first)', async () => {
   const { insert } = mockOwnedSession();
-  const name = 'b'.repeat(60);
+  const name = 'B'.repeat(60);
   const res = await auth(request(app).post('/api/sessions/s1/exercises'))
     .send({ id: 'ex1', name: `  ${name}  `, position: 0 });
   assert.strictEqual(res.status, 200);

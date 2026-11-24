@@ -80,19 +80,28 @@ for (const [label, body] of [
 test('POST /api/exercises accepts exactly 60 chars (padding trimmed first)', async () => {
   let captured;
   mock.method(pool, 'query', async (sql, params) => { captured = params; return { rows: [{ name: params[0] }] }; });  // INSERT ... RETURNING name
-  const name = 'b'.repeat(60);
+  const name = 'B'.repeat(60);
   const res = await auth(request(app).post('/api/exercises')).send({ name: `   ${name}   ` });
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(captured, [name]);
 });
 
-test('POST /api/exercises stores HTML-ish names verbatim (escaping is the renderer\'s job)', async () => {
+test('POST /api/exercises stores HTML-ish names unescaped (escaping is the renderer\'s job)', async () => {
   let captured;
   mock.method(pool, 'query', async (sql, params) => { captured = params; return { rows: [{ name: params[0] }] }; });  // INSERT ... RETURNING name
-  const name = `<img src=x onerror=alert(1)>`;
+  const name = `<img Src=x Onerror=alert(1)>`;   // already Title Cased, so stored as sent
   const res = await auth(request(app).post('/api/exercises')).send({ name });
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(captured, [name]);
+});
+
+test('POST /api/exercises Title Cases the name and returns the stored spelling', async () => {
+  let captured;
+  mock.method(pool, 'query', async (sql, params) => { captured = params; return { rows: [{ name: params[0] }] }; });  // INSERT ... RETURNING name
+  const res = await auth(request(app).post('/api/exercises')).send({ name: '  single-leg  RDL ' });
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(captured, ['Single-Leg RDL']);
+  assert.deepStrictEqual(res.body, { ok: true, name: 'Single-Leg RDL' });
 });
 
 // ─── Validation on rename (same rules as create) ──────────────────────────────

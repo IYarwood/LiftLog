@@ -14,8 +14,8 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/exercises — add a new exercise
-// body: { name: string }  (trimmed; 1–60 chars, see validation/exerciseName.js)
-// 200 { ok, name } when created.
+// body: { name: string }  (trimmed, Title Cased; 1–60 chars, see validation/exerciseName.js)
+// 200 { ok, name } when created; `name` is the stored (Title Cased) spelling.
 // 409 { error, name } when the library already has that name ignoring case
 // (exact or case variant); `name` is the existing library spelling, or null if
 // that row vanished meanwhile. Uniqueness is guaranteed by the unique index on
@@ -48,7 +48,8 @@ router.post('/', async (req, res) => {
 });
 
 // PATCH /api/exercises/:name — rename a library exercise
-// body: { name: string }  (same validation as POST)
+// body: { name: string }  (same validation and Title Casing as POST)
+// 200 { ok, name } with the stored spelling.
 // Changes the shared library row only. Logged workouts (session_exercises)
 // keep the name they were recorded with — history is never rewritten.
 // 404 if :name doesn't exist; 409 if another exercise already has the new name

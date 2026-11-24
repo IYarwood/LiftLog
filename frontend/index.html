@@ -503,9 +503,12 @@ function fmtTime(iso) {
 function totalSavedSets(sess) {
   return (sess.exercises||[]).reduce((a,e) => a + (e.sets||[]).filter(s=>s.savedAt).length, 0);
 }
+// All-time stats for one exercise across this user's finished workouts. Names
+// match ignoring case and surrounding spaces (sameName), like the leaderboard,
+// so older "leg curl" history counts toward "Leg Curl".
 function exerciseStats(exName) {
   const allSets = sessions.flatMap(s =>
-    (s.exercises||[]).filter(e=>e.name===exName).flatMap(e=>(e.sets||[]))
+    (s.exercises||[]).filter(e=>sameName(e.name, exName)).flatMap(e=>(e.sets||[]))
   ).filter(s => s.weight > 0);
   if (!allSets.length) return null;
   const weights = allSets.map(s => Number(s.weight));
@@ -516,8 +519,9 @@ function exerciseStats(exName) {
 }
 function el(id) { return document.getElementById(id); }
 // Exercise names match ignoring case everywhere ("Squat" == "squat"): the
-// library, the add sheet, and one-exercise-per-workout. The server compares
-// with lower(), and stores names trimmed.
+// library, the add sheet, one-exercise-per-workout, and all-time stats. The
+// server compares with lower(), and stores new names trimmed and Title Cased
+// (backend/src/validation/exerciseName.js), so use the name it returns.
 const sameName = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 // The active workout's entry for `name` (any casing), or undefined.
 function workoutExercise(name) {
@@ -654,7 +658,8 @@ async function addExerciseToSession(name) {
   const id = uid();
   const position = active.exercises.length;
   try {
-    await POST(`/sessions/${active.id}/exercises`, { id, name, position });
+    const res = await POST(`/sessions/${active.id}/exercises`, { id, name, position });
+    if (res && res.name) name = res.name;   // stored spelling (Title Cased)
   } catch (err) {
     if (err.status === 409 && err.body && err.body.id) {
       // The server already has it in this workout (added from another tab or
@@ -1696,8 +1701,10 @@ async function doAddLibraryExercise() {
   if (!name) { manageMsg(''); return; }
   const dup = exercises.find(e => sameName(e, name));
   if (dup) { manageMsg(`"${dup}" is already in the list`, true); return; }
+  let saved = name;
   try {
-    await POST('/exercises', { name });
+    const res = await POST('/exercises', { name });
+    if (res && res.name) saved = res.name;   // stored spelling (Title Cased)
   } catch (err) {
     if (err.status === 409) {
       // Someone else added it (in some casing) since this list was loaded.
@@ -1711,10 +1718,10 @@ async function doAddLibraryExercise() {
     manageMsg(err.status === 400 ? nameErrorMsg(err) : 'Could not add exercise — try again.', true);
     return;
   }
-  if (!exercises.includes(name)) exercises.push(name);
+  if (!exercises.includes(saved)) exercises.push(saved);
   sortExercises();
   input.value = '';
-  manageMsg(`added "${name}"`);
+  manageMsg(`added "${saved}"`);
   renderManage();
 }
 
@@ -1843,7 +1850,8 @@ async function createAndAdd(name) {
   const local = exercises.find(e => sameName(e, name));
   if (local) { addExerciseToSession(local); return; }
   try {
-    await POST('/exercises', { name });
+    const res = await POST('/exercises', { name });
+    if (res && res.name) name = res.name;   // stored spelling (Title Cased)
   } catch (err) {
     if (err.status === 409) {
       name = (err.body && err.body.name) || name;

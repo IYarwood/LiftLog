@@ -91,7 +91,7 @@ describe('session exercises (integration, real test DB)', { skip }, () => {
     assert.strictEqual((await addEx(sid, ID('d1'), 'Row')).status, 200);
     const again = await addEx(sid, ID('d1'), 'Row');
     assert.strictEqual(again.status, 200);
-    assert.deepStrictEqual(again.body, { ok: true, id: ID('d1') });
+    assert.deepStrictEqual(again.body, { ok: true, id: ID('d1'), name: 'Row' });
     assert.strictEqual((await getSession(sid)).exercises.length, 1);
   });
 

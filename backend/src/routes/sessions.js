@@ -196,7 +196,8 @@ router.delete('/:id', async (req, res) => {
 });
 
 // POST /api/sessions/:id/exercises — add an exercise to this user's session
-// body: { id: string, name: string (trimmed; 1–60 chars) }
+// body: { id: string, name: string (trimmed, Title Cased; 1–60 chars) }
+// 200 { ok, id, name } — `name` is the name as stored, so the client can show it.
 // `position` is assigned here as (highest in the session) + 1, so removing an
 // exercise never frees a slot that a later add would reuse. A client-sent
 // `position` is ignored (older clients sent their local count, which repeated).
@@ -239,7 +240,7 @@ router.post('/:id/exercises', async (req, res) => {
       await client.query('ROLLBACK');
       const same = dup.rows.find(r => r.id === id);
       if (same && same.session_id === req.params.id && same.name.toLowerCase() === name.toLowerCase()) {
-        return res.json({ ok: true, id });   // replay of an add that already succeeded
+        return res.json({ ok: true, id, name: same.name });   // replay of an add that already succeeded
       }
       if (same) return res.status(409).json({ error: 'exercise id already in use' });
       return res.status(409).json({
@@ -259,7 +260,7 @@ router.post('/:id/exercises', async (req, res) => {
       await client.query('UPDATE sessions SET edited_at = NOW() WHERE id = $1', [req.params.id]);
     }
     await client.query('COMMIT');
-    res.json({ ok: true, id });
+    res.json({ ok: true, id, name });
   } catch (err) {
     if (client) {
       try { await client.query('ROLLBACK'); } catch (rbErr) { brokenErr = rbErr; }

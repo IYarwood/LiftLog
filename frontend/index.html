@@ -1755,7 +1755,7 @@ function renderPoints(data) {
       </div>
       <button class="lb-step-btn" data-step="1" aria-label="next ${word}" ${off >= 0 ? 'disabled' : ''}>›</button>
     </div>
-    <div class="lb-rules">+1% on your best estimated 1RM vs your last ${r.baselineWeeks} weeks = ${r.pointsPerPercent} pts (max ${r.progressCap} per exercise, ${r.progressTotalCap} total this ${word}; jumps over ${r.maxGainPct}% don't count) · ${r.pointsPerDay} pts per workout day (max ${r.daysCap}) · tap a row for details</div>`;
+    <div class="lb-rules">+1% on your best estimated 1RM vs your last ${r.baselineWeeks} weeks = ${r.pointsPerPercent} pts (max ${r.progressCap} per exercise, ${r.progressTotalCap} total per ${word}; jumps over ${r.maxGainPct}% don't count) · ${r.pointsPerDay} pts per workout day (max ${r.daysCap}) · tap a row for details</div>`;
   const noPoints = data.entries.every(e => e.total === 0);
   el('lb-list').innerHTML = (noPoints
       ? `<div class="empty" style="padding:4px 0 14px;">${off === 0

@@ -23,6 +23,15 @@ test('no baseline → 0 points (first time sets the baseline)', () => {
   assert.strictEqual(P.progressPoints(0, 250, 'month').points, 0);
 });
 
+test("no baseline but done before the window → 'returning', still 0 points (p-liftlog-4002ce)", () => {
+  assert.deepStrictEqual(P.progressPoints(null, 250, 'week', true), { pct: null, points: 0, status: 'returning' });
+  assert.deepStrictEqual(P.progressPoints(null, 250, 'week', false), { pct: null, points: 0, status: 'new' });
+  // a baseline wins: doneBefore only matters without one
+  assert.strictEqual(P.progressPoints(100, 102, 'week', true).status, 'scored');
+  const [e] = P.buildBoard({ users: [{ id: 1, username: 'a' }], lifts: [{ userId: 1, name: 'Squat', baseline: null, best: 100, doneBefore: true }], days: new Map(), period: 'week', viewerId: 1 });
+  assert.strictEqual(e.exercises[0].status, 'returning');
+});
+
 test('+2.5% → 25 points; rounding to nearest point', () => {
   const r = P.progressPoints(P.e1rm(200, 5), P.e1rm(205, 5), 'week');
   assert.strictEqual(r.points, 25);

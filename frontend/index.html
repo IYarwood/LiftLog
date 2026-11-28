@@ -1630,6 +1630,7 @@ let lbSeq = 0;
 
 const LB_STATUS = {
   new: 'first time: sets your baseline',
+  returning: 'back after {weeks}+ wks: sets your baseline again',
   'no-gain': 'no gain on baseline',
   ignored: 'jump too big, ignored',
   capped: 'capped',
@@ -1776,7 +1777,8 @@ function pointsBreakdown(e, data) {
     const line = x.baseline === null
       ? `best e1RM ${fmtNum(x.best)} lb`
       : `e1RM ${fmtNum(x.baseline)} → ${fmtNum(x.best)} lb${gain}`;
-    const note = LB_STATUS[x.status] ? ` · ${LB_STATUS[x.status]}` : '';
+    const status = (LB_STATUS[x.status] || '').replace('{weeks}', data.rules.baselineWeeks);
+    const note = status ? ` · ${status}` : '';
     return `
     <div class="lb-line">
       <span class="main">${esc(x.name)}<span class="sub">${esc(line + note)}</span></span>

@@ -46,11 +46,14 @@ function e1rm(weight, reps) {
 // Points for one exercise in one period.
 //   baseline: best e1RM in the BASELINE_WEEKS before the period (null = none)
 //   best:     best e1RM in the period
-// status: 'new' (no baseline — this sets it), 'no-gain', 'ignored' (> MAX
-// gain), 'capped', 'scored'.
-function progressPoints(baseline, best, period) {
+//   doneBefore: the user logged it (a set that would count) before the
+//               baseline window — only matters when there is no baseline
+// status: 'new' (never done before — this sets the baseline), 'returning'
+// (done before, but not in the BASELINE_WEEKS before the period — this sets
+// the baseline again), 'no-gain', 'ignored' (> MAX gain), 'capped', 'scored'.
+function progressPoints(baseline, best, period, doneBefore = false) {
   const cap = PROGRESS_CAP[period];
-  if (!(baseline > 0)) return { pct: null, points: 0, status: 'new' };
+  if (!(baseline > 0)) return { pct: null, points: 0, status: doneBefore ? 'returning' : 'new' };
   // Round to 1e-6 % first so float noise (2.4999999) can't move the rounding.
   const pct = Math.round(((best - baseline) / baseline) * 100 * 1e6) / 1e6;
   if (pct <= 0) return { pct, points: 0, status: 'no-gain' };
@@ -130,7 +133,7 @@ const round1 = (n) => (n === null || n === undefined ? null : Math.round(n * 10)
 
 // Build the board for one period.
 //   users:  [{ id, username }]  — viewer + accepted friends
-//   lifts:  [{ userId, name, baseline, best }]  — best is non-null
+//   lifts:  [{ userId, name, baseline, best, doneBefore }]  — best is non-null
 //   days:   Map userId -> distinct workout days in the period
 function buildBoard({ users, lifts, days, period, viewerId }) {
   const byUser = new Map(users.map(u => [u.id, {
@@ -145,7 +148,7 @@ function buildBoard({ users, lifts, days, period, viewerId }) {
   for (const l of lifts) {
     const e = byUser.get(l.userId);
     if (!e) continue;
-    const p = progressPoints(l.baseline, l.best, period);
+    const p = progressPoints(l.baseline, l.best, period, !!l.doneBefore);
     e.progress += p.points;
     e.exercises.push({
       name: l.name,

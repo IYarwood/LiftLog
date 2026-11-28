@@ -686,7 +686,18 @@ async function finishSession() {
     }
     await PATCH(`/sessions/${sess.id}/finish`);
     setSaves.dropWhere(t => t.sessionId === sess.id);   // finished: stop retrying
-    sessions = [{ ...sess, finishedAt: new Date().toISOString() }, ...sessions];
+    // Typed values are strings as typed ("225,5"); the server stored numbers.
+    // Store numbers here too, or the share card, the detail view and
+    // exerciseStats read "225,5" as 0 until the next reload.
+    const done = {
+      ...sess,
+      finishedAt: new Date().toISOString(),
+      exercises: sess.exercises.map(ex => ({
+        ...ex,
+        sets: ex.sets.map(st => ({ ...st, reps: setFieldNumber(st.reps), weight: setFieldNumber(st.weight) })),
+      })),
+    };
+    sessions = [done, ...sessions];
     active = null;
     justFinishedId = sess.id;   // home shows "workout saved" with a share button
     showView('home');

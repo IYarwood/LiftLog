@@ -39,8 +39,10 @@ const PROGRESS_CAP = { week: 50, month: 100 };
 // Consistency points are separate (they have their own DAYS_CAP).
 const PROGRESS_TOTAL_CAP = { week: 150, month: 400 };
 
-// An improvement over this many percent in one period is ignored (0 points):
-// most likely a typo (2250 for 225) or cheating.
+// An improvement over this many percent in one period is ignored: most likely
+// a typo (2250 for 225) or cheating. Only the implausible LIFTS are skipped —
+// the best lift of the period within this margin still scores (countedBest),
+// so one typo doesn't hide real progress made the same week.
 const MAX_PLAUSIBLE_GAIN_PCT = 25;
 
 // Consistency: points per distinct local day with a finished workout, capped.
@@ -61,6 +63,29 @@ function e1rm(weight, reps) {
   return weight * (1 + reps / 30);
 }
 
+// % change from baseline to best, rounded to 1e-6 % first so float noise
+// (2.4999999) can't move later rounding.
+function gainPct(baseline, best) {
+  return Math.round(((best - baseline) / baseline) * 100 * 1e6) / 1e6;
+}
+
+// Which of a period's e1RMs counts for progress, given the baseline.
+//   e1rms: every e1RM the user logged for the exercise in the period (>= 1)
+// Rule: e1RMs more than MAX_PLAUSIBLE_GAIN_PCT above the baseline are taken as
+// typos and skipped; the best of the rest counts. So a 2250-for-225 typo next
+// to real 205s this week scores the 205s instead of zeroing the exercise.
+// If every lift is over the margin (or there's no baseline), the top one is
+// returned and progressPoints judges it as before ('ignored' / 'new').
+// Returns { best, ignored }: ignored = the highest skipped e1RM, or null.
+function countedBest(baseline, e1rms) {
+  const top = Math.max(...e1rms);
+  if (!(baseline > 0)) return { best: top, ignored: null };
+  const plausible = e1rms.filter(x => gainPct(baseline, x) <= MAX_PLAUSIBLE_GAIN_PCT);
+  if (!plausible.length) return { best: top, ignored: null };
+  const best = Math.max(...plausible);
+  return { best, ignored: top > best ? top : null };
+}
+
 // Points for one exercise in one period.
 //   baseline: best e1RM in the BASELINE_WEEKS before the period (null = none)
 //   best:     best e1RM in the period
@@ -72,8 +97,7 @@ function e1rm(weight, reps) {
 function progressPoints(baseline, best, period, doneBefore = false) {
   const cap = PROGRESS_CAP[period];
   if (!(baseline > 0)) return { pct: null, points: 0, status: doneBefore ? 'returning' : 'new' };
-  // Round to 1e-6 % first so float noise (2.4999999) can't move the rounding.
-  const pct = Math.round(((best - baseline) / baseline) * 100 * 1e6) / 1e6;
+  const pct = gainPct(baseline, best);
   if (pct <= 0) return { pct, points: 0, status: 'no-gain' };
   if (pct > MAX_PLAUSIBLE_GAIN_PCT) return { pct, points: 0, status: 'ignored' };
   const raw = Math.round(pct * POINTS_PER_PERCENT);
@@ -151,7 +175,9 @@ const round1 = (n) => (n === null || n === undefined ? null : Math.round(n * 10)
 
 // Build the board for one period.
 //   users:  [{ id, username }]  — viewer + accepted friends
-//   lifts:  [{ userId, name, baseline, best, doneBefore }]  — best is non-null
+//   lifts:  [{ userId, name, baseline, best, e1rms, doneBefore }]
+//           best: the period's top e1RM; e1rms (optional): all of the
+//           period's e1RMs, so a typo among them can be skipped (countedBest)
 //   days:   Map userId -> distinct workout days in the period
 function buildBoard({ users, lifts, days, period, viewerId }) {
   const byUser = new Map(users.map(u => [u.id, {
@@ -166,12 +192,14 @@ function buildBoard({ users, lifts, days, period, viewerId }) {
   for (const l of lifts) {
     const e = byUser.get(l.userId);
     if (!e) continue;
-    const p = progressPoints(l.baseline, l.best, period, !!l.doneBefore);
+    const c = countedBest(l.baseline, l.e1rms && l.e1rms.length ? l.e1rms : [l.best]);
+    const p = progressPoints(l.baseline, c.best, period, !!l.doneBefore);
     e.progress += p.points;
     e.exercises.push({
       name: l.name,
       baseline: round1(l.baseline),
-      best: round1(l.best),
+      best: round1(c.best),
+      ignored: round1(c.ignored),   // a higher e1RM skipped as a likely typo
       pct: p.pct === null ? null : Math.round(p.pct * 10) / 10,
       points: p.points,
       status: p.status,
@@ -195,6 +223,6 @@ function buildBoard({ users, lifts, days, period, viewerId }) {
 module.exports = {
   TIMEZONE, checkTimezone, E1RM_MIN_REPS, E1RM_MAX_REPS, BASELINE_WEEKS, POINTS_PER_PERCENT,
   PROGRESS_CAP, PROGRESS_TOTAL_CAP, MAX_PLAUSIBLE_GAIN_PCT, POINTS_PER_DAY, DAYS_CAP, PERIODS, CROWN_MAX_JUMP_PCT,
-  e1rm, progressPoints, consistencyPoints, assignRanks, buildBoard, round1,
+  e1rm, gainPct, countedBest, progressPoints, consistencyPoints, assignRanks, buildBoard, round1,
   withinCrownJump, isVerifiedLift, strengthStandings,
 };

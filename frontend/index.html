@@ -1778,7 +1778,8 @@ function pointsBreakdown(e, data) {
       ? `best e1RM ${fmtNum(x.best)} lb`
       : `e1RM ${fmtNum(x.baseline)} → ${fmtNum(x.best)} lb${gain}`;
     const status = (LB_STATUS[x.status] || '').replace('{weeks}', data.rules.baselineWeeks);
-    const note = status ? ` · ${status}` : '';
+    const skipped = x.ignored != null ? `skipped e1RM ${fmtNum(x.ignored)} lb (over +${data.rules.maxGainPct}%, likely a typo)` : '';
+    const note = [status, skipped].filter(Boolean).map(t => ` · ${t}`).join('');
     return `
     <div class="lb-line">
       <span class="main">${esc(x.name)}<span class="sub">${esc(line + note)}</span></span>

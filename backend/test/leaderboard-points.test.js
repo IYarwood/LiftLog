@@ -70,6 +70,32 @@ test('consistency: 10/day, capped at 4 days/week and 16 days/month', () => {
   assert.deepStrictEqual(P.consistencyPoints(22, 'month'), { days: 22, countedDays: 16, points: 160 });
 });
 
+// p-liftlog-45068c: one typo in the period must not hide that period's real progress.
+test('countedBest: lifts over the 25% margin are skipped, the best of the rest counts', () => {
+  assert.deepStrictEqual(P.countedBest(100, [102.5, 1025]), { best: 102.5, ignored: 1025 });
+  assert.deepStrictEqual(P.countedBest(100, [102.5, 101]), { best: 102.5, ignored: null });
+  assert.deepStrictEqual(P.countedBest(100, [125, 126]), { best: 125, ignored: 126 });   // exactly +25% is fine
+  assert.deepStrictEqual(P.countedBest(100, [99, 1025]), { best: 99, ignored: 1025 });    // real no-gain stays no-gain
+  // every lift implausible / no baseline: the top one, judged as before
+  assert.deepStrictEqual(P.countedBest(100, [1025, 400]), { best: 1025, ignored: null });
+  assert.deepStrictEqual(P.countedBest(null, [102.5, 1025]), { best: 1025, ignored: null });
+});
+
+test('buildBoard: a typo next to a real gain scores the real gain', () => {
+  const users = [{ id: 1, username: 'a' }];
+  const lifts = [
+    { userId: 1, name: 'Squat', baseline: 100, best: 1025, e1rms: [102.5, 1025, 101] },
+    { userId: 1, name: 'Deadlift', baseline: 100, best: 400, e1rms: [400] },   // only a typo
+    { userId: 1, name: 'Bench', baseline: 100, best: 103 },                    // no e1rms: best alone
+  ];
+  const [e] = P.buildBoard({ users, lifts, days: new Map(), period: 'week', viewerId: 1 });
+  const ex = Object.fromEntries(e.exercises.map(x => [x.name, x]));
+  assert.deepStrictEqual([ex.Squat.best, ex.Squat.pct, ex.Squat.points, ex.Squat.status, ex.Squat.ignored], [102.5, 2.5, 25, 'scored', 1025]);
+  assert.deepStrictEqual([ex.Deadlift.best, ex.Deadlift.points, ex.Deadlift.status, ex.Deadlift.ignored], [400, 0, 'ignored', null]);
+  assert.deepStrictEqual([ex.Bench.points, ex.Bench.ignored], [30, null]);
+  assert.strictEqual(e.progress, 55);
+});
+
 test('assignRanks: ties share a rank (1, 1, 3)', () => {
   const rows = [{ v: 9 }, { v: 9 }, { v: 5 }, { v: 5 }, { v: 1 }];
   P.assignRanks(rows, (a, b) => a.v === b.v);

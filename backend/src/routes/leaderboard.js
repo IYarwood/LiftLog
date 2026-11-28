@@ -80,6 +80,7 @@ async function pointsBoard(viewerId, period, { offset = 0, now = new Date(), tz 
      SELECT l.user_id, l.key,
             COALESCE(ex.name, (array_agg(l.name ORDER BY l.finished_at DESC))[1]) AS name,
             max(l.e1rm) FILTER (WHERE l.in_period)     AS best,
+            array_agg(DISTINCT l.e1rm) FILTER (WHERE l.in_period) AS e1rms,
             max(l.e1rm) FILTER (WHERE NOT l.in_period) AS baseline,
             EXISTS (
               SELECT 1 FROM sessions s2
@@ -116,6 +117,7 @@ async function pointsBoard(viewerId, period, { offset = 0, now = new Date(), tz 
     lifts: liftsRes.rows.map(r => ({
       userId: r.user_id, name: r.name,
       best: Number(r.best),
+      e1rms: (r.e1rms || []).map(Number),
       baseline: r.baseline === null ? null : Number(r.baseline),
       doneBefore: r.done_before === true,
     })),

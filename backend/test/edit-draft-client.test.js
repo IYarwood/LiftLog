@@ -131,5 +131,5 @@ test('done is the only place edit-mode field changes are sent, and only after va
 });
 
 test('live workouts still autosave through the queue (PR #10 unchanged)', () => {
-  assert.match(fnBody('updateSetField'), /setSaves\.schedule\(setId, \{ sessionId: active\.id, exId, setId \}, \{ \[field\]: fieldSaveValue\(field, val\) \}\)/);
+  assert.match(fnBody('updateSetField'), /queueSetFields\(setSaves, setId, \{ sessionId: active\.id, exId, setId \}, \{ \[field\]: val \}\)/);
 });

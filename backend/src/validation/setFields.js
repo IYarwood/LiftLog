@@ -18,9 +18,12 @@ function readNumber(body, key) {
   const v = body[key];
   if (v === null) return { value: null };
   if (typeof v === 'string') {
-    if (!v.trim()) return { value: null };
-    const n = Number(v);
-    return Number.isFinite(n) ? { value: n } : { bad: true };
+    const t = v.trim();
+    if (!t) return { value: null };
+    // Plain decimal digits only: Number() alone would also take "1e3",
+    // "0x10", "0b11", "+5" (same rule as frontend/js/setFields.js).
+    if (!/^\d*\.?\d*$/.test(t) || !/\d/.test(t)) return { bad: true };
+    return { value: Number(t) };
   }
   if (typeof v === 'number' && Number.isFinite(v)) return { value: v };
   return { bad: true };

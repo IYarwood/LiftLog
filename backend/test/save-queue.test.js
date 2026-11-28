@@ -343,3 +343,21 @@ test('saveNow: a failing send rejects so the caller can requeue', async () => {
   const q = createSaveQueue(async () => {}, 1000);
   await assert.rejects(saveNow(q, 's1', () => ({ reps: 5 }), async () => { throw new Error('offline'); }), /offline/);
 });
+
+test('unschedule removes only the given fields and blocks retry of an older failing send', async () => {
+  const { createSaveQueue } = await load();
+  mock.method(console, 'error', () => {});
+  const sent = []; let fail = true;
+  const q = createSaveQueue(async (t, f) => { await sleep(20); if (fail) { fail = false; throw new Error('offline'); } sent.push(f); }, 1000);
+  q.schedule('s', {}, { weight: '2255', reps: '5' });
+  q.flush('s');                     // in flight, will fail
+  q.unschedule('s', ['weight']);    // weight became invalid meanwhile
+  await q.flushAll();               // the failed send is requeued (reps only)…
+  assert.strictEqual(await q.flushAll(), true);   // …and retried by the next flush
+  assert.deepStrictEqual(sent, [{ reps: '5' }]);   // reps retried, weight not
+  q.schedule('s', {}, { weight: '1', reps: '2' });
+  q.unschedule('s', ['weight']);
+  assert.deepStrictEqual(q.pendingFields('s'), { reps: '2' });
+  q.unschedule('s', ['reps']);
+  assert.strictEqual(q.size, 0);
+});

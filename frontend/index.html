@@ -514,7 +514,7 @@
 <script type="module">
 import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
 import { createSaveQueue, saveNow } from './js/saveQueue.js?v=dev';
-import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue, setFieldNumber } from './js/setFields.js?v=dev';
+import { SET_LIMITS_MSG, setFieldError, setErrorText, setFieldNumber, queueSetFields } from './js/setFields.js?v=dev';
 import { makeDraft, draftChanges, hasDraftChanges } from './js/editDraft.js?v=dev';
 import { buildShareModel, shareCaption, shareFileName, shareCacheKey, hasShareableSets, renderShareImage } from './js/shareCard.js?v=dev';
 
@@ -841,11 +841,7 @@ function updateSetField(exId, setId, field, val) {
   if (!s) return;
   s[field] = val;
   showSetErrors(setId, s);
-  // Always replace this field's queued save. An invalid value is saved as null
-  // (cleared): just skipping it would leave the previous keystroke ("2255" on
-  // the way to "22555") queued or stored. Scheduling also bumps the field's
-  // version, so an older in-flight save that fails is not retried.
-  setSaves.schedule(setId, { sessionId: active.id, exId, setId }, { [field]: fieldSaveValue(field, val) });
+  queueSetFields(setSaves, setId, { sessionId: active.id, exId, setId }, { [field]: val });
 }
 
 function setRowLocked(setId, locked) {
@@ -873,7 +869,7 @@ async function saveSet(exId, setId) {
   } catch (err) {
     setRowLocked(setId, false);
     // Put the typed values back in the queue so FINISH still sends them.
-    setSaves.schedule(setId, target, { reps: fieldSaveValue('reps', s.reps), weight: fieldSaveValue('weight', s.weight) });
+    queueSetFields(setSaves, setId, target, { reps: s.reps, weight: s.weight });
     alert(err.status === 400 ? `Not saved: ${(err.body && err.body.error) || 'invalid value'}.`
       : 'Could not save the set — check your connection and try again.');
     return;

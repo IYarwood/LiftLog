@@ -12,23 +12,24 @@ const frontend = (f) => import(pathToFileURL(path.resolve(__dirname, '../../fron
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 afterEach(() => mock.restoreAll());
 
-test('fieldSaveValue: valid → value, blank → null (clear), invalid → null (clear)', async () => {
+test('fieldSaveValue: valid → value, blank → null (clear), invalid → undefined (send nothing)', async () => {
   const { fieldSaveValue } = await frontend('setFields.js');
   assert.strictEqual(fieldSaveValue('weight', '225.5'), '225.5');
   assert.strictEqual(fieldSaveValue('reps', '8'), '8');
   assert.strictEqual(fieldSaveValue('reps', '0'), '0');
   assert.strictEqual(fieldSaveValue('weight', ''), null);
-  assert.strictEqual(fieldSaveValue('weight', '22555'), null);
-  assert.strictEqual(fieldSaveValue('weight', '12345'), null);
-  assert.strictEqual(fieldSaveValue('reps', '1.5'), null);
-  assert.strictEqual(fieldSaveValue('reps', '-1'), null);
+  assert.strictEqual(fieldSaveValue('weight', '22555'), undefined);
+  assert.strictEqual(fieldSaveValue('weight', '12345'), undefined);
+  assert.strictEqual(fieldSaveValue('reps', '1.5'), undefined);
+  assert.strictEqual(fieldSaveValue('reps', '-1'), undefined);
 });
 
 test('client and server agree on which values are valid', async () => {
   const { setFieldError } = await frontend('setFields.js');
   const cases = {
-    reps: ['0', '1', '9999', '10000', '1.5', '-1', '1e3', 'abc'],
-    weight: ['0', '225', '225.5', '102.25', '9999.99', '9999.995', '10000', '12345', '-5', '1e3', 'abc'],
+    reps: ['0', '1', '9999', '10000', '1.5', '-1', '1e3', 'abc', '0x10', '+5', ' 8 '],
+    weight: ['0', '225', '225.5', '102.25', '9999.99', '9999.995', '10000', '12345', '-5', '1e3', 'abc',
+      '0x10', '0b11', '+5', '.5', '225.', '.', '1.2.3', 'Infinity'],
   };
   for (const [field, vals] of Object.entries(cases)) {
     for (const v of vals) {
@@ -39,12 +40,12 @@ test('client and server agree on which values are valid', async () => {
   }
 });
 
-// What the app does on each keystroke: updateSetField schedules
-// fieldSaveValue(field, value) for that field.
-async function harness({ delay = 20, sendImpl } = {}) {
+// What the app does on each keystroke: updateSetField calls
+// queueSetFields(queue, setId, target, { [field]: value }).
+async function harness({ delay = 20, sendImpl, stored = {} } = {}) {
   const { createSaveQueue } = await frontend('saveQueue.js');
-  const { fieldSaveValue } = await frontend('setFields.js');
-  const server = { reps: null, weight: null };
+  const { fieldSaveValue, queueSetFields } = await frontend('setFields.js');
+  const server = { reps: null, weight: null, ...stored };
   const sends = [];
   const q = createSaveQueue(async (t, fields) => {
     if (sendImpl) await sendImpl(fields);
@@ -54,7 +55,7 @@ async function harness({ delay = 20, sendImpl } = {}) {
   const target = { sessionId: 'A', exId: 'e', setId: 's1' };
   const type = async (field, text, gap = 0) => {
     for (let i = 1; i <= text.length; i++) {
-      q.schedule('s1', target, { [field]: fieldSaveValue(field, text.slice(0, i)) });
+      queueSetFields(q, 's1', target, { [field]: text.slice(0, i) });
       if (gap) await sleep(gap);
     }
   };
@@ -70,13 +71,66 @@ test('repro 1: typing 22555 (fast) stores nothing, not 2255', async () => {
   assert.ok(!h.sends.some(f => f.weight === '2255'), JSON.stringify(h.sends));
 });
 
-test('repro 1, typed slowly: 2255 was saved during a pause, then 22555 clears it', async () => {
+test('repro 1, typed slowly: 2255 was saved during a pause; 22555 sends nothing more', async () => {
   const h = await harness({ delay: 10 });
   await h.type('weight', '2255', 30);        // each keystroke saved
   assert.strictEqual(h.server.weight, '2255');
+  const before = h.sends.length;
+  h.sends.length = 0;
   await h.type('weight', '22555');           // the extra "5" makes it invalid
   await h.q.flushAll();
+  assert.ok(before > 0);
+  assert.deepStrictEqual(h.sends.filter(f => f.weight !== '2' && f.weight !== '22' && f.weight !== '225' && f.weight !== '2255'), []);
+  assert.ok(!h.sends.some(f => f.weight === null), 'invalid never clears');
+});
+
+// Tester FAIL on PR #15: an invalid value used to be saved as null, wiping a
+// stored weight. Invalid input must send nothing and keep what's stored.
+test('typing 1,000 or 22,5,5 over a stored 225.5 keeps 225.5 (red, nothing sent)', async () => {
+  const { setFieldError, WEIGHT_FORMAT_MSG } = await frontend('setFields.js');
+  for (const text of ['1,000', '22,5,5']) {
+    const h = await harness({ stored: { weight: 225.5 } });
+    await h.type('weight', text);            // fast: earlier keystrokes still queued
+    assert.strictEqual(await h.q.flushAll(), true);
+    assert.strictEqual(h.server.weight, 225.5, text);
+    assert.deepStrictEqual(h.sends, [], text);
+    assert.strictEqual(setFieldError('weight', text), WEIGHT_FORMAT_MSG);
+  }
+});
+
+test('emptying the field on purpose still clears the stored value', async () => {
+  const h = await harness({ stored: { weight: 225.5 } });
+  h.clear('weight');
+  await h.q.flushAll();
   assert.strictEqual(h.server.weight, null);
+});
+
+test('an invalid value only unschedules its own field', async () => {
+  const h = await harness({ stored: { weight: 225.5, reps: 3 } });
+  await h.type('reps', '8');
+  await h.type('weight', '1e3');
+  await h.q.flushAll();
+  assert.deepStrictEqual([h.server.reps, h.server.weight], ['8', 225.5]);
+});
+
+test('error text: format problems say how to write it, range problems give the range', async () => {
+  const { setFieldError } = await frontend('setFields.js');
+  assert.strictEqual(setFieldError('weight', '1,000'), 'Use a number like 225 or 225.5.');
+  assert.strictEqual(setFieldError('weight', 'abc'), 'Use a number like 225 or 225.5.');
+  assert.strictEqual(setFieldError('weight', '12345'), 'Weight must be from 0 to 9999.99 lb.');
+  assert.strictEqual(setFieldError('reps', 'abc'), 'Reps must be a whole number, like 8.');
+  assert.strictEqual(setFieldError('reps', '1.5'), 'Reps must be a whole number from 0 to 9999.');
+});
+
+test('non-decimal forms are rejected on both sides: 1e3, 0x10, 0b11, +5', async () => {
+  const { setFieldError } = await frontend('setFields.js');
+  for (const v of ['1e3', '0x10', '0b11', '+5', '-5', 'Infinity']) {
+    assert.notStrictEqual(setFieldError('weight', v), '', v);
+    assert.ok(parseSetFields({ weight: v }).error, v);
+    assert.ok(parseSetFields({ reps: v }).error, v);
+  }
+  // real numbers (JSON) are still fine on the server
+  assert.deepStrictEqual(parseSetFields({ reps: 8, weight: 225.5 }).fields, { reps: 8, weight: 225.5 });
 });
 
 test('repro 2: typing 12345 then clearing the field stores null, not 1234', async () => {
@@ -142,7 +196,7 @@ test('comma decimal: parsed, sent with a dot, never treated as blank', async () 
   // Not a decimal comma → invalid (red), not silently misread.
   for (const v of ['1,000', '22,5,5', ',', '2.5,5']) {
     assert.notStrictEqual(setFieldError('weight', v), '', v);
-    assert.strictEqual(fieldSaveValue('weight', v), null, v);
+    assert.strictEqual(fieldSaveValue('weight', v), undefined, v);
   }
   assert.notStrictEqual(setFieldError('reps', '8,5'), '');
   assert.strictEqual(normalizeSetInput('8'), '8');

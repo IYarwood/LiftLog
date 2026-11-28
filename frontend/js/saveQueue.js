@@ -84,6 +84,18 @@ export function createSaveQueue(send, delay = 600, { onRejected } = {}) {
       pending.set(key, entry);
     },
     flush: fire,
+    // Take `fields` out of a key's pending save without sending anything (the
+    // value on screen became invalid: what's stored stays as it is). Also
+    // bumps their version, so an older in-flight send of them that fails is
+    // not retried.
+    unschedule(key, fields) {
+      const lv = latest.get(key);
+      if (lv) for (const f of fields) lv[f] = ++version;
+      const p = pending.get(key);
+      if (!p) return;
+      for (const f of fields) { delete p.fields[f]; delete p.vers[f]; }
+      if (!Object.keys(p.fields).length) { clearTimeout(p.timer); pending.delete(key); }
+    },
     // Send everything now and wait for it, including sends already in flight.
     // Resolves true unless an edit is still unsaved because its send failed
     // (it stays queued for the next flush).

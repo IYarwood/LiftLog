@@ -295,7 +295,7 @@
   .lb-period { font-size: 12px; color: var(--text); margin-bottom: 2px; }
   .lb-step { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .lb-step-mid { flex: 1; min-width: 0; text-align: center; }
-  .lb-step-mid .lb-period { margin-bottom: 0; }
+  .lb-step-mid .lb-period { margin-bottom: 0; white-space: nowrap; }
   .lb-step-name { font-family: var(--disp); font-size: 18px; letter-spacing: 1px; text-transform: uppercase; color: var(--text); }
   .lb-step-btn {
     flex-shrink: 0; width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
@@ -1654,8 +1654,14 @@ const LB_STATUS = {
   scored: '',
 };
 
-function fmtDay(ymd) {   // 'YYYY-MM-DD' (a local date in the board's timezone)
-  return new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', timeZone:'UTC' });
+// 'YYYY-MM-DD' pair (local dates in the board's timezone) → "Nov 23 – 29",
+// "Oct 26 – Nov 1", "Dec 29 – Jan 4, 2025" (year only when not this year).
+function fmtRange(a, b) {
+  const d = (ymd, opts) => new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-US', { ...opts, timeZone: 'UTC' });
+  const sameMonth = a.slice(0, 7) === b.slice(0, 7);
+  const end = sameMonth ? d(b, { day: 'numeric' }) : d(b, { month: 'short', day: 'numeric' });
+  const year = Number(b.slice(0, 4)) !== new Date().getFullYear() ? `, ${b.slice(0, 4)}` : '';
+  return `${d(a, { month: 'short', day: 'numeric' })} – ${end}${year}`;
 }
 function fmtShortDate(iso) {
   const d = new Date(iso);
@@ -1732,7 +1738,10 @@ function lbHeadLoading(board) {
   [...head.children].forEach(c => { if (c !== step) c.remove(); });
   const off = lbOffset[board];
   step.querySelector('.lb-step-name').textContent = lbPeriodName(board, off);
-  step.querySelector('.lb-period').textContent = 'loading…';
+  step.querySelector('.lb-range').textContent = 'loading…';
+  const state = step.querySelector('.lb-state');
+  state.textContent = '\u00a0';   // keeps the line's height while loading
+  state.classList.remove('text-accent');
   step.querySelector('[data-step="-1"]').disabled = off <= -LB_MAX_BACK;
   step.querySelector('[data-step="1"]').disabled = off >= 0;
 }
@@ -1757,8 +1766,8 @@ function renderPoints(data) {
       <button class="lb-step-btn" data-step="-1" aria-label="previous ${word}" ${off <= -LB_MAX_BACK ? 'disabled' : ''}>‹</button>
       <div class="lb-step-mid">
         <div class="lb-step-name">${esc(lbPeriodName(word, off))}</div>
-        <div class="lb-period">${esc(fmtDay(data.startDate))} – ${esc(fmtDay(data.endDate))} · ${off === 0
-          ? `<span class="text-accent">${esc(resetsIn(data.end))}</span>` : 'final'}</div>
+        <div class="lb-period lb-range">${esc(fmtRange(data.startDate, data.endDate))}</div>
+        <div class="lb-period lb-state${off === 0 ? ' text-accent' : ''}">${esc(off === 0 ? resetsIn(data.end) : 'final')}</div>
       </div>
       <button class="lb-step-btn" data-step="1" aria-label="next ${word}" ${off >= 0 ? 'disabled' : ''}>›</button>
     </div>

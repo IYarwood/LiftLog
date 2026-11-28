@@ -209,6 +209,7 @@
     flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border);
     border-radius: 6px; padding: 7px 10px; color: var(--text); font-family: var(--mono); font-size: 16px;
   }
+  .ex-edit-input.invalid { border-color: var(--danger) !important; }   /* beats input:focus */
   .ex-add-row { display: flex; gap: 8px; margin-bottom: 14px; }
   .ex-add-row .search-input { flex: 1; min-width: 0; margin-bottom: 0; }
   .ex-add-row .mini-btn { height: auto; min-height: 44px; min-width: 44px; }
@@ -1937,6 +1938,13 @@ function showRowMsg(name, text, isErr) {
   box.className = 'ex-row-msg' + (isErr ? ' err' : '');
   box.textContent = text;
   box.scrollIntoView({ block: 'nearest' });
+  const input = row.querySelector('.ex-edit-input');
+  if (input) {
+    input.classList.toggle('invalid', !!isErr);
+    // Keep the keyboard up to fix it (SAVE's mousedown doesn't take focus,
+    // see below; this is the fallback).
+    if (isErr && document.activeElement !== input) input.focus();
+  }
 }
 function sortExercises() { exercises.sort((a, b) => a.localeCompare(b)); }
 // One library write at a time, so a double-tap can't send the same request twice.
@@ -2177,7 +2185,15 @@ onNameButton('manage-list', '.ex-edit-btn', startRename);
 onNameButton('manage-list', '.ex-save-btn', saveRename);
 onNameButton('manage-list', '.ex-cancel-btn', cancelRename);
 el('manage-list').addEventListener('input', e => {
-  if (e.target.classList.contains('ex-edit-input')) manageDraft = e.target.value;
+  if (e.target.classList.contains('ex-edit-input')) {
+    manageDraft = e.target.value;
+    e.target.classList.remove('invalid');
+  }
+});
+// Tapping "save" must not take focus from the rename input: if the name is
+// refused, the iPhone keyboard stays up to fix it.
+el('manage-list').addEventListener('mousedown', e => {
+  if (e.target.closest('.ex-save-btn')) e.preventDefault();
 });
 el('manage-list').addEventListener('keydown', e => {
   if (!e.target.classList.contains('ex-edit-input') || manageEditing === null) return;

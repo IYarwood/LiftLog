@@ -296,3 +296,88 @@ test('flush on a key with nothing pending or in flight resolves immediately', as
   const q = createSaveQueue(async () => {}, 600);
   await q.flush('nothing');
 });
+
+// p-liftlog-220144: SAVE used to read the inputs before awaiting the in-flight
+// as-you-type save, so a keystroke made during that wait was neither in the
+// full PATCH nor kept on screen.
+test('saveNow reads the values only after the in-flight save has landed', async () => {
+  const { createSaveQueue, saveNow } = await load();
+  const server = {};
+  let release;
+  const gate = new Promise(r => { release = r; });
+  const q = createSaveQueue(async (t, f) => { await gate; Object.assign(server, f); }, 1000);
+  const state = { weight: '22' };
+  const target = { sessionId: 'A', exId: 'e', setId: 's1' };
+  q.schedule('s1', target, { weight: state.weight });
+  q.flush('s1');                                  // as-you-type save now in flight
+  const sentFull = [];
+  const done = saveNow(q, 's1', () => ({ weight: state.weight }), async (v) => { sentFull.push(v); Object.assign(server, v); });
+  await sleep(5);
+  state.weight = '225';                           // typed while that save is in flight
+  q.schedule('s1', target, { weight: state.weight });
+  release();
+  const vals = await done;
+  assert.deepStrictEqual(vals, { weight: '225' });
+  assert.deepStrictEqual(sentFull, [{ weight: '225' }]);
+  assert.strictEqual(server.weight, '225');
+  assert.strictEqual(q.size, 0, 'the queued edit is covered by the full save, not resent');
+  await sleep(20);
+  assert.strictEqual(server.weight, '225');
+});
+
+test('saveNow: read() returning null sends nothing and keeps queued edits', async () => {
+  const { createSaveQueue, saveNow } = await load();
+  const { sent, send } = recorder();
+  const q = createSaveQueue(send, 1000);
+  const t = { sessionId: 'A', exId: 'e', setId: 's1' };
+  let full = 0;
+  const p = saveNow(q, 's1', () => { q.schedule('s1', t, { weight: null }); return null; }, async () => { full++; });
+  assert.strictEqual(await p, null);
+  assert.strictEqual(full, 0);
+  assert.strictEqual(q.size, 1);
+  q.drop('s1');
+});
+
+test('saveNow: a failing send rejects so the caller can requeue', async () => {
+  const { createSaveQueue, saveNow } = await load();
+  const q = createSaveQueue(async () => {}, 1000);
+  await assert.rejects(saveNow(q, 's1', () => ({ reps: 5 }), async () => { throw new Error('offline'); }), /offline/);
+});
+
+// Reviewer on PR #15: with a debounce SHORTER than the in-flight time, an edit
+// typed during saveNow's wait fires its own send, which was still in flight
+// when the full PATCH went out and landed after it (UI 2250, server 225).
+test('saveNow: a send that started during the wait lands before the full save', async () => {
+  const { createSaveQueue, saveNow } = await load();
+  const server = {}; const log = [];
+  const q = createSaveQueue(async (t, f) => { await sleep(100); Object.assign(server, f); log.push('typed ' + f.weight); }, 60);
+  const state = { weight: '22' };
+  q.schedule('s', {}, { weight: '22' }); q.flush('s');                     // A in flight
+  const done = saveNow(q, 's', () => ({ weight: state.weight }),
+    async (v) => { await sleep(5); Object.assign(server, v); log.push('full ' + v.weight); });
+  await sleep(2); state.weight = '225'; q.schedule('s', {}, { weight: '225' });    // B fires during A's flight
+  await sleep(70); state.weight = '2250'; q.schedule('s', {}, { weight: '2250' }); // C pending when A lands
+  const vals = await done;
+  await sleep(300);
+  assert.strictEqual(vals.weight, '2250');
+  assert.strictEqual(server.weight, '2250', JSON.stringify(log));
+  assert.strictEqual(log.at(-1), 'full 2250');
+});
+
+test('unschedule removes only the given fields and blocks retry of an older failing send', async () => {
+  const { createSaveQueue } = await load();
+  mock.method(console, 'error', () => {});
+  const sent = []; let fail = true;
+  const q = createSaveQueue(async (t, f) => { await sleep(20); if (fail) { fail = false; throw new Error('offline'); } sent.push(f); }, 1000);
+  q.schedule('s', {}, { weight: '2255', reps: '5' });
+  q.flush('s');                     // in flight, will fail
+  q.unschedule('s', ['weight']);    // weight became invalid meanwhile
+  await q.flushAll();               // the failed send is requeued (reps only)…
+  assert.strictEqual(await q.flushAll(), true);   // …and retried by the next flush
+  assert.deepStrictEqual(sent, [{ reps: '5' }]);   // reps retried, weight not
+  q.schedule('s', {}, { weight: '1', reps: '2' });
+  q.unschedule('s', ['weight']);
+  assert.deepStrictEqual(q.pendingFields('s'), { reps: '2' });
+  q.unschedule('s', ['reps']);
+  assert.strictEqual(q.size, 0);
+});

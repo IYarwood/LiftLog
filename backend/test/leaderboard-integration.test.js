@@ -172,6 +172,44 @@ describe('leaderboard (integration, real test DB)', { skip }, () => {
   });
 
   // ── Authorization + strength, real clock via HTTP ─────────────────────────
+  // ── "first time" vs "back after 8+ weeks" (p-liftlog-4002ce) ────────────
+  describe('returning exercises (pinned clock)', () => {
+    const opts = { now: new Date('2026-11-21T20:00:00Z'), tz: 'America/New_York' };
+    before(async () => {
+      await makeUser('ret');
+      // Front Squat in August (before the 8-week baseline window), again this week.
+      await makeSession('ret', '2026-08-03T15:00:00Z', [['Front Squat', 5, 100]]);
+      await makeSession('ret', '2026-11-18T15:00:00Z', [['Front Squat', 5, 105], ['Hack Squat', 5, 200], ['Lunge', 5, 50]]);
+      // Lunge was done before only with 15 reps (never a counting set): still "new".
+      await makeSession('ret', '2026-08-04T15:00:00Z', [['Lunge', 15, 50]]);
+    });
+    test("done before the window → 'returning'; never done → 'new'", async () => {
+      const b = await pointsBoard(U.ret.id, 'week', opts);
+      const me = b.entries.find(e => e.isYou);
+      const ex = Object.fromEntries(me.exercises.map(x => [x.name, x]));
+      assert.deepStrictEqual([ex['Front Squat'].status, ex['Front Squat'].points, ex['Front Squat'].baseline], ['returning', 0, null]);
+      assert.strictEqual(ex['Hack Squat'].status, 'new');
+      assert.strictEqual(ex.Lunge.status, 'new');
+    });
+  });
+
+  // ── A typo this week doesn't hide real progress (p-liftlog-45068c) ───────
+  describe('typo lift in the period (pinned clock)', () => {
+    const opts = { now: new Date('2026-11-21T20:00:00Z'), tz: 'America/New_York' };
+    before(async () => {
+      await makeUser('typo');
+      await makeSession('typo', '2026-11-10T15:00:00Z', [['Squat', 5, 200]]);           // baseline e1RM 233.3
+      await makeSession('typo', '2026-11-17T15:00:00Z', [['Squat', 5, 205], ['Squat', 5, 205]]);   // real +2.5%
+      await makeSession('typo', '2026-11-19T15:00:00Z', [['Squat', 5, 2050]]);           // typo
+    });
+    test('the real 205s score; the 2050 is reported as skipped', async () => {
+      const b = await pointsBoard(U.typo.id, 'week', opts);
+      const sq = b.entries.find(e => e.isYou).exercises.find(x => x.name === 'Squat');
+      assert.deepStrictEqual([sq.baseline, sq.best, sq.pct, sq.points, sq.status], [233.3, 239.2, 2.5, 25, 'scored']);
+      assert.strictEqual(sq.ignored, 2391.7);
+    });
+  });
+
   describe('authorization and strength board (HTTP)', () => {
     const t = (minAgo) => new Date(Date.now() - minAgo * 60e3).toISOString();
 

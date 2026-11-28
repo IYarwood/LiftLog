@@ -199,10 +199,17 @@
   .ex-manage-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); min-height: 52px; }
   .ex-manage-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-d); }
   .ex-manage-row .mini-btn { padding: 0 10px; }
+  /* Rename result under its row; covers the row's bottom border so they read as one. */
+  .ex-row-msg {
+    position: relative; margin-top: -1px; padding: 0 0 10px; background: var(--bg);
+    border-bottom: 1px solid var(--border); font-size: 12px; color: var(--accent-t); overflow-wrap: anywhere;
+  }
+  .ex-row-msg.err { color: var(--danger); }
   .ex-edit-input {
     flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border);
     border-radius: 6px; padding: 7px 10px; color: var(--text); font-family: var(--mono); font-size: 16px;
   }
+  .ex-edit-input.invalid { border-color: var(--danger) !important; }   /* beats input:focus */
   .ex-add-row { display: flex; gap: 8px; margin-bottom: 14px; }
   .ex-add-row .search-input { flex: 1; min-width: 0; margin-bottom: 0; }
   .ex-add-row .mini-btn { height: auto; min-height: 44px; min-width: 44px; }
@@ -287,6 +294,17 @@
   .seg-btn.active { background: var(--accent-dim); color: var(--accent-t); }
   .seg-btn:active { opacity: 0.75; }
   .lb-period { font-size: 12px; color: var(--text); margin-bottom: 2px; }
+  .lb-step { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .lb-step-mid { flex: 1; min-width: 0; text-align: center; }
+  .lb-step-mid .lb-period { margin-bottom: 0; white-space: nowrap; }
+  .lb-step-mid .lb-state.text-accent { color: var(--accent-t); }   /* .lb-period (later) would win */
+  .lb-step-name { font-family: var(--disp); font-size: 18px; letter-spacing: 1px; text-transform: uppercase; color: var(--text); }
+  .lb-step-btn {
+    flex-shrink: 0; width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-size: 22px; line-height: 1;
+  }
+  .lb-step-btn:active { border-color: var(--border-h); }
+  .lb-step-btn:disabled { opacity: 0.3; }
   .lb-rules { font-size: 10px; color: var(--text-d); line-height: 1.5; margin-bottom: 14px; }
   .lb-row {
     width: 100%; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 10px 12px;
@@ -497,8 +515,8 @@
 
 <script type="module">
 import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
-import { createSaveQueue } from './js/saveQueue.js?v=dev';
-import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue } from './js/setFields.js?v=dev';
+import { createSaveQueue, saveNow } from './js/saveQueue.js?v=dev';
+import { SET_LIMITS_MSG, setFieldError, setErrorText, setFieldNumber, queueSetFields } from './js/setFields.js?v=dev';
 import { makeDraft, draftChanges, hasDraftChanges } from './js/editDraft.js?v=dev';
 import { buildShareModel, shareCaption, shareFileName, shareCacheKey, hasShareableSets, renderShareImage } from './js/shareCard.js?v=dev';
 
@@ -515,6 +533,10 @@ let editDraft = null;         // local copy being edited; sent only on "done"
 let manageReturn = 'home';    // view to go back to from the exercises page
 let manageEditing = null;     // library name currently being renamed, or null
 let manageDraft = '';         // text in the rename input (survives re-renders)
+// A rename's result is shown right under that exercise's row: the message at
+// the top of the page is off-screen when the row is far down the list on a
+// phone. { name, text, isErr }, or null.
+let manageRowMsg = null;
 let me = '';                  // my username (from /auth/me), shown on share images
 let justFinishedId = null;    // workout finished this visit: home offers to share it
 
@@ -666,7 +688,18 @@ async function finishSession() {
     }
     await PATCH(`/sessions/${sess.id}/finish`);
     setSaves.dropWhere(t => t.sessionId === sess.id);   // finished: stop retrying
-    sessions = [{ ...sess, finishedAt: new Date().toISOString() }, ...sessions];
+    // Typed values are strings as typed ("225,5"); the server stored numbers.
+    // Store numbers here too, or the share card, the detail view and
+    // exerciseStats read "225,5" as 0 until the next reload.
+    const done = {
+      ...sess,
+      finishedAt: new Date().toISOString(),
+      exercises: sess.exercises.map(ex => ({
+        ...ex,
+        sets: ex.sets.map(st => ({ ...st, reps: setFieldNumber(st.reps), weight: setFieldNumber(st.weight) })),
+      })),
+    };
+    sessions = [done, ...sessions];
     active = null;
     justFinishedId = sess.id;   // home shows "workout saved" with a share button
     showView('home');
@@ -821,13 +854,13 @@ function updateSetField(exId, setId, field, val) {
   if (!s) return;
   s[field] = val;
   showSetErrors(setId, s);
-  // Always replace this field's queued save. An invalid value is saved as null
-  // (cleared): just skipping it would leave the previous keystroke ("2255" on
-  // the way to "22555") queued or stored. Scheduling also bumps the field's
-  // version, so an older in-flight save that fails is not retried.
-  setSaves.schedule(setId, { sessionId: active.id, exId, setId }, { [field]: fieldSaveValue(field, val) });
+  queueSetFields(setSaves, setId, { sessionId: active.id, exId, setId }, { [field]: val });
 }
 
+function setRowLocked(setId, locked) {
+  const row = el('setrow-' + setId);
+  if (row) row.querySelectorAll('.set-input').forEach(inp => { inp.readOnly = locked; });
+}
 async function saveSet(exId, setId) {
   const ex = active.exercises.find(e => e.id === exId);
   if (!ex) return;
@@ -835,21 +868,26 @@ async function saveSet(exId, setId) {
   if (!s) return;
   if (setErrorText(s)) { showSetErrors(setId, s); return; }
   const target = { sessionId: active.id, exId, setId };
-  const vals = { reps: Number(s.reps) || 0, weight: Number(s.weight) || 0, savedAt: new Date().toISOString() };
-  // This PATCH carries every field, so the queued as-you-type save is no longer
-  // needed — but one may already be in flight. Let it land first, so it can't
-  // arrive after (and overwrite) this one.
-  setSaves.drop(setId);
-  await setSaves.flush(setId);
+  // saveNow waits for an as-you-type save already in flight, THEN reads the
+  // values (so a keystroke made meanwhile is what gets saved and shown), and
+  // drops the queued save this full PATCH replaces.
+  let vals;
   try {
-    await PATCH(`/sessions/${target.sessionId}/exercises/${exId}/sets/${setId}`, vals);
+    vals = await saveNow(setSaves, setId, () => {
+      if (!setExists(target)) return null;              // removed meanwhile
+      if (setErrorText(s)) { showSetErrors(setId, s); return null; }
+      setRowLocked(setId, true);   // no typing while the PATCH is out: it would be overwritten
+      return { reps: setFieldNumber(s.reps) || 0, weight: setFieldNumber(s.weight) || 0, savedAt: new Date().toISOString() };
+    }, (v) => PATCH(`/sessions/${target.sessionId}/exercises/${exId}/sets/${setId}`, v));
   } catch (err) {
+    setRowLocked(setId, false);
     // Put the typed values back in the queue so FINISH still sends them.
-    setSaves.schedule(setId, target, { reps: fieldSaveValue('reps', s.reps), weight: fieldSaveValue('weight', s.weight) });
+    queueSetFields(setSaves, setId, target, { reps: s.reps, weight: s.weight });
     alert(err.status === 400 ? `Not saved: ${(err.body && err.body.error) || 'invalid value'}.`
       : 'Could not save the set — check your connection and try again.');
     return;
   }
+  if (!vals) return;
   Object.assign(s, vals);
   renderWorkout(setId);
 }
@@ -932,11 +970,11 @@ function renderWorkout(flashSetId) {
       return `
         <div class="set-row ${flash}" id="setrow-${esc(s.id)}">
           <div class="set-num ${saved ? 'saved' : ''}">${si+1}</div>
-          <input class="set-input ${saved ? 'saved' : ''} ${!saved && setFieldError('reps', s.reps) ? 'invalid' : ''}" data-field="reps" type="number" inputmode="numeric" placeholder="—"
+          <input class="set-input ${saved ? 'saved' : ''} ${!saved && setFieldError('reps', s.reps) ? 'invalid' : ''}" data-field="reps" type="text" inputmode="numeric" autocomplete="off" placeholder="—"
             value="${esc(s.reps)}" ${saved ? 'readonly' : ''}
             onchange="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'reps',this.value)"
             oninput="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'reps',this.value)">
-          <input class="set-input ${saved ? 'saved' : ''} ${!saved && setFieldError('weight', s.weight) ? 'invalid' : ''}" data-field="weight" type="number" inputmode="decimal" placeholder="—"
+          <input class="set-input ${saved ? 'saved' : ''} ${!saved && setFieldError('weight', s.weight) ? 'invalid' : ''}" data-field="weight" type="text" inputmode="decimal" autocomplete="off" placeholder="—"
             value="${esc(s.weight)}" ${saved ? 'readonly' : ''}
             onchange="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'weight',this.value)"
             oninput="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'weight',this.value)">
@@ -1315,9 +1353,9 @@ function renderDetailEdit() {
       ${ex.sets.map((st, si) => `
         <div class="edit-set-row" id="setrow-${esc(st.id)}">
           <div class="set-num saved">${si + 1}</div>
-          <input class="set-input ${setFieldError('reps', st.reps) ? 'invalid' : ''}" data-field="reps" type="number" inputmode="numeric" placeholder="—"
+          <input class="set-input ${setFieldError('reps', st.reps) ? 'invalid' : ''}" data-field="reps" type="text" inputmode="numeric" autocomplete="off" placeholder="—"
             value="${esc(st.reps ?? '')}" oninput="editSetField(${jsArg(ex.id)},${jsArg(st.id)},'reps',this.value)">
-          <input class="set-input ${setFieldError('weight', st.weight) ? 'invalid' : ''}" data-field="weight" type="number" inputmode="decimal" placeholder="—"
+          <input class="set-input ${setFieldError('weight', st.weight) ? 'invalid' : ''}" data-field="weight" type="text" inputmode="decimal" autocomplete="off" placeholder="—"
             value="${esc(st.weight ?? '')}" oninput="editSetField(${jsArg(ex.id)},${jsArg(st.id)},'weight',this.value)">
           <button class="set-del-btn" aria-label="delete set" onclick="editRemoveSet(${jsArg(ex.id)},${jsArg(st.id)})">×</button>
         </div>
@@ -1601,21 +1639,31 @@ function openFeedItem(i) { if (feedItems[i]) openFriendDetail(feedItems[i], 'fee
 // accepted friends) and which workouts count (finished only). Everything
 // user-controlled (usernames, exercise names) goes through esc().
 let lbBoard = 'week';           // 'week' | 'month' | 'strength'
-const lbData = {};              // board -> last response
+const lbData = {};              // lbKey() -> last response
+const lbOffset = { week: 0, month: 0 };   // 0 = current period, -1 = the one before, …
+const LB_MAX_BACK = 520;        // the server's limit (routes/leaderboard.js MAX_OFFSET)
+const lbKey = (board) => board === 'strength' ? 'strength' : `${board}:${lbOffset[board]}`;
 const lbOpen = {};              // board -> open row key (username / exercise key)
 const lbDetail = {};            // lowercased exercise name -> strength detail response
 let lbSeq = 0;
 
 const LB_STATUS = {
   new: 'first time: sets your baseline',
+  returning: 'back after {weeks}+ wks: sets your baseline again',
   'no-gain': 'no gain on baseline',
   ignored: 'jump too big, ignored',
   capped: 'capped',
   scored: '',
 };
 
-function fmtDay(ymd) {   // 'YYYY-MM-DD' (a local date in the board's timezone)
-  return new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', timeZone:'UTC' });
+// 'YYYY-MM-DD' pair (local dates in the board's timezone) → "Nov 23 – 29",
+// "Oct 26 – Nov 1", "Dec 29 – Jan 4, 2025" (year only when not this year).
+function fmtRange(a, b) {
+  const d = (ymd, opts) => new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-US', { ...opts, timeZone: 'UTC' });
+  const sameMonth = a.slice(0, 7) === b.slice(0, 7);
+  const end = sameMonth ? d(b, { day: 'numeric' }) : d(b, { month: 'short', day: 'numeric' });
+  const year = Number(b.slice(0, 4)) !== new Date().getFullYear() ? `, ${b.slice(0, 4)}` : '';
+  return `${d(a, { month: 'short', day: 'numeric' })} – ${end}${year}`;
 }
 function fmtShortDate(iso) {
   const d = new Date(iso);
@@ -1641,27 +1689,30 @@ function setLbBoard(board) {
 
 async function loadLeaderboard() {
   const board = lbBoard;
+  const key = lbKey(board);
   const seq = ++lbSeq;
-  if (lbData[board]) renderLeaderboard();
-  else { el('lb-cta').innerHTML = ''; el('lb-head').innerHTML = ''; el('lb-filter').style.display = 'none'; el('lb-list').innerHTML = `<div class="loading">loading…</div>`; }
+  if (lbData[key]) renderLeaderboard();
+  else { el('lb-cta').innerHTML = ''; lbHeadLoading(board); el('lb-filter').style.display = 'none'; el('lb-list').innerHTML = `<div class="loading">loading…</div>`; }
   try {
-    const path = board === 'week' ? '/leaderboard/weekly' : board === 'month' ? '/leaderboard/monthly' : '/leaderboard/strength';
+    const off = board === 'strength' ? 0 : lbOffset[board];
+    const path = (board === 'week' ? '/leaderboard/weekly' : board === 'month' ? '/leaderboard/monthly' : '/leaderboard/strength')
+      + (off ? `?offset=${off}` : '');
     const res = await GET(path);
-    if (seq !== lbSeq) return;   // switched boards meanwhile
-    lbData[board] = res;
+    if (seq !== lbSeq) return;   // switched boards or periods meanwhile
+    lbData[key] = res;
     if (board === 'strength') for (const k of Object.keys(lbDetail)) delete lbDetail[k];
     renderLeaderboard();
     // Re-fetch an already open strength exercise so it isn't stale.
     if (board === 'strength' && lbOpen.strength) loadStrengthDetail(lbOpen.strength);
   } catch (err) {
     if (seq !== lbSeq) return;
-    if (!lbData[board]) el('lb-list').innerHTML = `<div class="empty">could not load leaderboard</div>`;
+    if (!lbData[key]) el('lb-list').innerHTML = `<div class="empty">could not load leaderboard</div>`;
   }
 }
 
 function renderLeaderboard() {
   if (currentView !== 'leaderboard') return;
-  const data = lbData[lbBoard];
+  const data = lbData[lbKey(lbBoard)];
   if (!data) return;
   el('lb-cta').innerHTML = data.hasFriends ? '' : `
     <div class="card lb-cta">
@@ -1673,16 +1724,61 @@ function renderLeaderboard() {
   else renderPoints(data);
 }
 
+// "this week", "last month", "3 weeks ago", …
+function lbPeriodName(period, offset) {
+  if (offset === 0) return `this ${period}`;
+  if (offset === -1) return `last ${period}`;
+  return `${-offset} ${period}s ago`;
+}
+
+// While a weekly/monthly board loads, keep the stepper where it is (so the
+// arrow stays under a repeat tap) showing the period being loaded.
+function lbHeadLoading(board) {
+  const head = el('lb-head');
+  const step = board !== 'strength' && head.querySelector('.lb-step');
+  if (!step) { head.innerHTML = ''; return; }
+  [...head.children].forEach(c => { if (c !== step) c.remove(); });
+  const off = lbOffset[board];
+  step.querySelector('.lb-step-name').textContent = lbPeriodName(board, off);
+  step.querySelector('.lb-range').textContent = 'loading…';
+  const state = step.querySelector('.lb-state');
+  state.textContent = '\u00a0';   // keeps the line's height while loading
+  state.classList.remove('text-accent');
+  step.querySelector('[data-step="-1"]').disabled = off <= -LB_MAX_BACK;
+  step.querySelector('[data-step="1"]').disabled = off >= 0;
+}
+
+// Step the weekly/monthly board to an earlier (-1) or later (+1) period. Never
+// past the current one.
+function stepLbPeriod(delta) {
+  if (lbBoard === 'strength') return;
+  const next = lbOffset[lbBoard] + delta;
+  if (next > 0 || next < -LB_MAX_BACK) return;
+  lbOffset[lbBoard] = next;
+  loadLeaderboard();
+}
+
 function renderPoints(data) {
   el('lb-filter').style.display = 'none';
   const word = data.period === 'week' ? 'week' : 'month';
   const r = data.rules;
+  const off = data.offset || 0;
   el('lb-head').innerHTML = `
-    <div class="lb-period">${esc(fmtDay(data.startDate))} – ${esc(fmtDay(data.endDate))} · <span class="text-accent">${esc(resetsIn(data.end))}</span></div>
-    <div class="lb-rules">+1% on your best estimated 1RM vs your last ${r.baselineWeeks} weeks = ${r.pointsPerPercent} pts (max ${r.progressCap} per exercise, ${r.progressTotalCap} total this ${word}; jumps over ${r.maxGainPct}% don't count) · ${r.pointsPerDay} pts per workout day (max ${r.daysCap}) · tap a row for details</div>`;
+    <div class="lb-step">
+      <button class="lb-step-btn" data-step="-1" aria-label="previous ${word}" ${off <= -LB_MAX_BACK ? 'disabled' : ''}>‹</button>
+      <div class="lb-step-mid">
+        <div class="lb-step-name">${esc(lbPeriodName(word, off))}</div>
+        <div class="lb-period lb-range">${esc(fmtRange(data.startDate, data.endDate))}</div>
+        <div class="lb-period lb-state${off === 0 ? ' text-accent' : ''}">${esc(off === 0 ? resetsIn(data.end) : 'final')}</div>
+      </div>
+      <button class="lb-step-btn" data-step="1" aria-label="next ${word}" ${off >= 0 ? 'disabled' : ''}>›</button>
+    </div>
+    <div class="lb-rules">+1% on your best estimated 1RM vs your last ${r.baselineWeeks} weeks = ${r.pointsPerPercent} pts (max ${r.progressCap} per exercise, ${r.progressTotalCap} total per ${word}; jumps over ${r.maxGainPct}% don't count) · ${r.pointsPerDay} pts per workout day (max ${r.daysCap}) · tap a row for details</div>`;
   const noPoints = data.entries.every(e => e.total === 0);
   el('lb-list').innerHTML = (noPoints
-      ? `<div class="empty" style="padding:4px 0 14px;">no points yet this ${word} — finish a workout to get on the board</div>` : '')
+      ? `<div class="empty" style="padding:4px 0 14px;">${off === 0
+          ? `no points yet this ${word} — finish a workout to get on the board`
+          : `nobody scored points that ${word}`}</div>` : '')
     + data.entries.map(e => {
       const open = lbOpen[lbBoard] === e.username;
       return `
@@ -1709,7 +1805,9 @@ function pointsBreakdown(e, data) {
     const line = x.baseline === null
       ? `best e1RM ${fmtNum(x.best)} lb`
       : `e1RM ${fmtNum(x.baseline)} → ${fmtNum(x.best)} lb${gain}`;
-    const note = LB_STATUS[x.status] ? ` · ${LB_STATUS[x.status]}` : '';
+    const status = (LB_STATUS[x.status] || '').replace('{weeks}', data.rules.baselineWeeks);
+    const skipped = x.ignored != null ? `skipped e1RM ${fmtNum(x.ignored)} lb (over +${data.rules.maxGainPct}%, likely a typo)` : '';
+    const note = [status, skipped].filter(Boolean).map(t => ` · ${t}`).join('');
     return `
     <div class="lb-line">
       <span class="main">${esc(x.name)}<span class="sub">${esc(line + note)}</span></span>
@@ -1791,6 +1889,10 @@ el('lb-seg').addEventListener('click', e => {
   const b = e.target.closest('.seg-btn');
   if (b) setLbBoard(b.dataset.board);
 });
+el('lb-head').addEventListener('click', e => {
+  const b = e.target.closest('.lb-step-btn');
+  if (b && !b.disabled) stepLbPeriod(Number(b.dataset.step));
+});
 el('lb-list').addEventListener('click', e => {
   const row = e.target.closest('.lb-row');
   if (row && el('lb-list').contains(row)) toggleLbRow(row.dataset.key);
@@ -1809,6 +1911,41 @@ function openManage() {
 function manageMsg(text, isErr) {
   el('manage-msg').textContent = text || '';
   el('manage-msg').classList.toggle('err', !!isErr);
+  manageRowMsg = null;
+  el('manage-list').querySelectorAll('.ex-row-msg').forEach(m => m.remove());
+}
+function manageRowMsgHtml(name) {
+  const m = manageRowMsg;
+  return m && m.name === name ? `<div class="ex-row-msg${m.isErr ? ' err' : ''}" role="status">${esc(m.text)}</div>` : '';
+}
+function findManageRow(name) {
+  return [...el('manage-list').querySelectorAll('.ex-manage-row')].find(r => r.dataset.row === name) || null;
+}
+// Show a message under `name`'s row, updating the DOM in place (no re-render,
+// so the rename input keeps focus and the keyboard stays up), and scroll it
+// into view.
+function showRowMsg(name, text, isErr) {
+  el('manage-msg').textContent = '';
+  el('manage-msg').classList.remove('err');
+  manageRowMsg = { name, text, isErr: !!isErr };
+  const row = findManageRow(name);
+  if (!row) return;
+  let box = row.nextElementSibling;
+  if (!box || !box.classList.contains('ex-row-msg')) {
+    box = document.createElement('div');
+    box.setAttribute('role', 'status');
+    row.after(box);
+  }
+  box.className = 'ex-row-msg' + (isErr ? ' err' : '');
+  box.textContent = text;
+  box.scrollIntoView({ block: 'nearest' });
+  const input = row.querySelector('.ex-edit-input');
+  if (input) {
+    input.classList.toggle('invalid', !!isErr);
+    // Keep the keyboard up to fix it (SAVE's mousedown doesn't take focus,
+    // see below; this is the fallback).
+    if (isErr && document.activeElement !== input) input.focus();
+  }
 }
 function sortExercises() { exercises.sort((a, b) => a.localeCompare(b)); }
 // One library write at a time, so a double-tap can't send the same request twice.
@@ -1829,24 +1966,27 @@ async function loadManage() {
 
 function renderManage() {
   const filter = (el('manage-filter').value || '').toLowerCase();
-  const filtered = exercises.filter(e => e.toLowerCase().includes(filter) || e === manageEditing);
+  // The row being edited, or just renamed, stays visible even if the filter no
+  // longer matches it.
+  const filtered = exercises.filter(e => e.toLowerCase().includes(filter) || e === manageEditing ||
+    (manageRowMsg && e === manageRowMsg.name));
   const list = el('manage-list');
   if (!filtered.length) {
     list.innerHTML = `<div class="empty">${exercises.length ? 'no exercises match' : 'no exercises yet'}</div>`;
     return;
   }
-  list.innerHTML = filtered.map(name => name === manageEditing ? `
-    <div class="ex-manage-row">
+  list.innerHTML = filtered.map(name => (name === manageEditing ? `
+    <div class="ex-manage-row" data-row="${esc(name)}">
       <input class="ex-edit-input" type="text" maxlength="60" value="${esc(manageDraft)}"
         aria-label="new name" autocomplete="off" enterkeyhint="done">
       <button class="mini-btn accent ex-save-btn" data-name="${esc(name)}">save</button>
       <button class="mini-btn ex-cancel-btn" data-name="${esc(name)}">cancel</button>
     </div>` : `
-    <div class="ex-manage-row">
+    <div class="ex-manage-row" data-row="${esc(name)}">
       <span class="ex-manage-name">${esc(name)}</span>
       <button class="mini-btn ex-edit-btn" data-name="${esc(name)}">edit</button>
       <button class="mini-btn danger ex-remove-btn" data-name="${esc(name)}">remove</button>
-    </div>`).join('');
+    </div>`) + manageRowMsgHtml(name)).join('');
 }
 
 function addLibraryExercise() { return manageWrite(doAddLibraryExercise); }
@@ -1901,27 +2041,33 @@ function cancelRename() {
 function saveRename(oldName) { return manageWrite(() => doSaveRename(oldName)); }
 async function doSaveRename(oldName) {
   const name = manageDraft.trim();
-  if (!name) { manageMsg(EXERCISE_NAME_MSG, true); return; }
+  if (!name) { showRowMsg(oldName, EXERCISE_NAME_MSG, true); return; }
   if (name === oldName) { cancelRename(); return; }
+  let res;
   try {
-    const res = await PATCH(`/exercises/${encodeURIComponent(oldName)}`, { name });
-    exercises = exercises.map(e => e === oldName ? res.name : e);
-    sortExercises();
-    manageEditing = null;
-    manageMsg(`renamed to "${res.name}"`);
+    res = await PATCH(`/exercises/${encodeURIComponent(oldName)}`, { name });
   } catch (err) {
-    if (err.status === 409) { manageMsg('another exercise already has that name', true); return; }
-    if (err.status === 400) { manageMsg(nameErrorMsg(err), true); return; }
+    if (err.status === 409) { showRowMsg(oldName, 'another exercise already has that name', true); return; }
+    if (err.status === 400) { showRowMsg(oldName, nameErrorMsg(err), true); return; }
     if (err.status === 404) {
+      // The row is gone, so this one goes at the top — scrolled into view.
       manageMsg('that exercise was removed or renamed by someone else — list refreshed', true);
       manageEditing = null;
+      el('manage-msg').scrollIntoView({ block: 'center' });
       loadManage();
       return;
     }
-    manageMsg('Could not rename exercise — try again.', true);
+    showRowMsg(oldName, 'Could not rename exercise — try again.', true);
     return;
   }
+  exercises = exercises.map(e => e === oldName ? res.name : e);
+  sortExercises();
+  manageEditing = null;
+  manageRowMsg = { name: res.name, text: `renamed to "${res.name}"`, isErr: false };
   renderManage();
+  // It may have moved in the sorted list: bring it (and its message) into view.
+  const row = findManageRow(res.name);
+  if (row) row.scrollIntoView({ block: 'center' });
 }
 
 function removeExercise_lib(name) { return manageWrite(() => doRemoveExercise(name)); }
@@ -2040,7 +2186,15 @@ onNameButton('manage-list', '.ex-edit-btn', startRename);
 onNameButton('manage-list', '.ex-save-btn', saveRename);
 onNameButton('manage-list', '.ex-cancel-btn', cancelRename);
 el('manage-list').addEventListener('input', e => {
-  if (e.target.classList.contains('ex-edit-input')) manageDraft = e.target.value;
+  if (e.target.classList.contains('ex-edit-input')) {
+    manageDraft = e.target.value;
+    e.target.classList.remove('invalid');
+  }
+});
+// Tapping "save" must not take focus from the rename input: if the name is
+// refused, the iPhone keyboard stays up to fix it.
+el('manage-list').addEventListener('mousedown', e => {
+  if (e.target.closest('.ex-save-btn')) e.preventDefault();
 });
 el('manage-list').addEventListener('keydown', e => {
   if (!e.target.classList.contains('ex-edit-input') || manageEditing === null) return;

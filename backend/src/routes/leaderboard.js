@@ -60,6 +60,8 @@ async function pointsBoard(viewerId, period, { offset = 0, now = new Date(), tz 
 
   // Best e1RM per user per exercise (case-insensitive) in the period, and in
   // the baseline window before it. Only exercises done IN the period come back.
+  // done_before: a set that would count was logged before the baseline window
+  // (tells "back after 8+ weeks" apart from a real first time).
   const liftsRes = await pool.query(
     `WITH ${BOARD_CTE},
      lifts AS (
@@ -78,7 +80,16 @@ async function pointsBoard(viewerId, period, { offset = 0, now = new Date(), tz 
      SELECT l.user_id, l.key,
             COALESCE(ex.name, (array_agg(l.name ORDER BY l.finished_at DESC))[1]) AS name,
             max(l.e1rm) FILTER (WHERE l.in_period)     AS best,
-            max(l.e1rm) FILTER (WHERE NOT l.in_period) AS baseline
+            array_agg(DISTINCT l.e1rm) FILTER (WHERE l.in_period) AS e1rms,
+            max(l.e1rm) FILTER (WHERE NOT l.in_period) AS baseline,
+            EXISTS (
+              SELECT 1 FROM sessions s2
+                JOIN session_exercises se2 ON se2.session_id = s2.id
+                JOIN sets st2 ON st2.session_exercise_id = se2.id
+               WHERE s2.user_id = l.user_id AND lower(se2.name) = l.key
+                 AND s2.finished_at IS NOT NULL AND s2.finished_at < $4
+                 AND st2.reps BETWEEN $5 AND $6 AND st2.weight > 0
+            ) AS done_before
        FROM lifts l
        LEFT JOIN exercises ex ON lower(ex.name) = l.key
       GROUP BY l.user_id, l.key, ex.name
@@ -106,7 +117,9 @@ async function pointsBoard(viewerId, period, { offset = 0, now = new Date(), tz 
     lifts: liftsRes.rows.map(r => ({
       userId: r.user_id, name: r.name,
       best: Number(r.best),
+      e1rms: (r.e1rms || []).map(Number),
       baseline: r.baseline === null ? null : Number(r.baseline),
+      doneBefore: r.done_before === true,
     })),
     days: new Map(daysRes.rows.map(r => [r.user_id, r.days])),
     period,

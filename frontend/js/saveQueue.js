@@ -84,6 +84,18 @@ export function createSaveQueue(send, delay = 600, { onRejected } = {}) {
       pending.set(key, entry);
     },
     flush: fire,
+    // Take `fields` out of a key's pending save without sending anything (the
+    // value on screen became invalid: what's stored stays as it is). Also
+    // bumps their version, so an older in-flight send of them that fails is
+    // not retried.
+    unschedule(key, fields) {
+      const lv = latest.get(key);
+      if (lv) for (const f of fields) lv[f] = ++version;
+      const p = pending.get(key);
+      if (!p) return;
+      for (const f of fields) { delete p.fields[f]; delete p.vers[f]; }
+      if (!Object.keys(p.fields).length) { clearTimeout(p.timer); pending.delete(key); }
+    },
     // Send everything now and wait for it, including sends already in flight.
     // Resolves true unless an edit is still unsaved because its send failed
     // (it stays queued for the next flush).
@@ -124,4 +136,27 @@ export function createSaveQueue(send, delay = 600, { onRejected } = {}) {
     },
     get size() { return pending.size; },
   };
+}
+
+// Save one key's full value now (the set's SAVE button), outside the debounce.
+// Any as-you-type save for the key is sent first and awaited, so it can't land
+// after (and overwrite) this one. Only THEN are the values read: read() runs
+// after the wait, so a keystroke made while that save was in flight is part of
+// what gets sent (reading first sent — and showed — the older value).
+//   read()     → the values to send, or null to not save (e.g. now invalid);
+//                its edits stay queued in that case.
+//   send(vals) → the request; if it throws, the error propagates (the caller
+//                decides how to requeue).
+// Resolves to the values sent, or null if read() declined.
+export async function saveNow(queue, key, read, send) {
+  await queue.flush(key);
+  const vals = read();
+  if (!vals) return null;
+  queue.drop(key);   // edits typed during the wait are in vals: don't resend them
+  // A send that STARTED during the wait (its debounce fired) is still in
+  // flight; drop() can't stop it. Let it land first, or it could arrive
+  // after (and overwrite) the full save.
+  await queue.flush(key);
+  await send(vals);
+  return vals;
 }

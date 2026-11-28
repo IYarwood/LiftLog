@@ -153,6 +153,10 @@ export async function saveNow(queue, key, read, send) {
   const vals = read();
   if (!vals) return null;
   queue.drop(key);   // edits typed during the wait are in vals: don't resend them
+  // A send that STARTED during the wait (its debounce fired) is still in
+  // flight; drop() can't stop it. Let it land first, or it could arrive
+  // after (and overwrite) the full save.
+  await queue.flush(key);
   await send(vals);
   return vals;
 }

@@ -344,6 +344,26 @@ test('saveNow: a failing send rejects so the caller can requeue', async () => {
   await assert.rejects(saveNow(q, 's1', () => ({ reps: 5 }), async () => { throw new Error('offline'); }), /offline/);
 });
 
+// Reviewer on PR #15: with a debounce SHORTER than the in-flight time, an edit
+// typed during saveNow's wait fires its own send, which was still in flight
+// when the full PATCH went out and landed after it (UI 2250, server 225).
+test('saveNow: a send that started during the wait lands before the full save', async () => {
+  const { createSaveQueue, saveNow } = await load();
+  const server = {}; const log = [];
+  const q = createSaveQueue(async (t, f) => { await sleep(100); Object.assign(server, f); log.push('typed ' + f.weight); }, 60);
+  const state = { weight: '22' };
+  q.schedule('s', {}, { weight: '22' }); q.flush('s');                     // A in flight
+  const done = saveNow(q, 's', () => ({ weight: state.weight }),
+    async (v) => { await sleep(5); Object.assign(server, v); log.push('full ' + v.weight); });
+  await sleep(2); state.weight = '225'; q.schedule('s', {}, { weight: '225' });    // B fires during A's flight
+  await sleep(70); state.weight = '2250'; q.schedule('s', {}, { weight: '2250' }); // C pending when A lands
+  const vals = await done;
+  await sleep(300);
+  assert.strictEqual(vals.weight, '2250');
+  assert.strictEqual(server.weight, '2250', JSON.stringify(log));
+  assert.strictEqual(log.at(-1), 'full 2250');
+});
+
 test('unschedule removes only the given fields and blocks retry of an older failing send', async () => {
   const { createSaveQueue } = await load();
   mock.method(console, 'error', () => {});

@@ -8,8 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="LiftLog">
 <meta name="theme-color" content="#080b0f">
 <title>LiftLog</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/fonts.css?v=dev">
 <style>
   :root {
     --bg: #080b0f;
@@ -321,6 +320,24 @@
   .lb-line .val.zero { color: var(--text-d); }
   .lb-cta { text-align: center; padding: 18px 12px; margin-bottom: 14px; }
   .lb-cta .btn-secondary { margin: 12px 0 0; min-height: 44px; }
+
+  /* Share workout as image */
+  .actions-row { display: flex; gap: 6px; align-items: flex-start; }
+  #finished-card { border-color: rgba(74,240,176,0.3); margin-bottom: 16px; }
+  #share-overlay {
+    display: none; position: fixed; top: 0; left: 0; right: 0; height: 100%; z-index: 210;
+    background: rgba(0,0,0,0.92); flex-direction: column; align-items: center; justify-content: center;
+    padding: calc(var(--safe-top) + 16px) 16px calc(var(--safe-bot) + 16px);
+  }
+  #share-overlay.open { display: flex; }
+  #share-preview-img {
+    display: block; max-width: 100%; max-height: calc(100% - 120px); width: auto; height: auto;
+    border: 1px solid var(--border); border-radius: 8px; -webkit-touch-callout: default;
+  }
+  .share-hint { color: #8299ac; font-size: 11px; margin: 14px 0 12px; text-align: center; line-height: 1.5; }
+  .share-actions { display: flex; gap: 8px; justify-content: center; }
+  .share-actions .mini-btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; line-height: 1; }
+  .share-actions .mini-btn:not(.accent) { background: var(--surface); }
 </style>
 </head>
 <body>
@@ -347,6 +364,8 @@
         <span class="no-shrink" style="color:var(--accent); font-size:20px;">→</span>
       </div>
     </div>
+
+    <div id="finished-slot"></div>
 
     <button class="btn-primary" id="start-btn" onclick="startSession()">START WORKOUT</button>
 
@@ -465,11 +484,23 @@
   </div>
 </div>
 
+<!-- SHARE IMAGE PREVIEW (fallback: long-press / download to save) -->
+<div id="share-overlay" onclick="if(event.target===this)closeSharePreview()">
+  <img id="share-preview-img" alt="workout share image">
+  <div class="share-hint">press and hold the image to save it</div>
+  <div class="share-actions">
+    <button class="mini-btn accent" id="share-preview-share" onclick="sharePreviewAgain()" style="display:none">share</button>
+    <a class="mini-btn" id="share-preview-dl" download="liftlog.png">download</a>
+    <button class="mini-btn" onclick="closeSharePreview()">close</button>
+  </div>
+</div>
+
 <script type="module">
 import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
 import { createSaveQueue } from './js/saveQueue.js?v=dev';
 import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue } from './js/setFields.js?v=dev';
 import { makeDraft, draftChanges, hasDraftChanges } from './js/editDraft.js?v=dev';
+import { buildShareModel, shareCaption, shareFileName, shareCacheKey, hasShareableSets, renderShareImage } from './js/shareCard.js?v=dev';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let exercises = [];   // string[]
@@ -484,6 +515,8 @@ let editDraft = null;         // local copy being edited; sent only on "done"
 let manageReturn = 'home';    // view to go back to from the exercises page
 let manageEditing = null;     // library name currently being renamed, or null
 let manageDraft = '';         // text in the rename input (survives re-renders)
+let me = '';                  // my username (from /auth/me), shown on share images
+let justFinishedId = null;    // workout finished this visit: home offers to share it
 
 // Friends state
 let friendsData = { friends: [], incoming: [], outgoing: [] };
@@ -606,6 +639,7 @@ async function startSession() {
   const startedAt = new Date().toISOString();
   await POST('/sessions', { id, startedAt });
   active = { id, startedAt, exercises: [] };
+  justFinishedId = null;
   showView('workout');
 }
 
@@ -634,7 +668,9 @@ async function finishSession() {
     setSaves.dropWhere(t => t.sessionId === sess.id);   // finished: stop retrying
     sessions = [{ ...sess, finishedAt: new Date().toISOString() }, ...sessions];
     active = null;
+    justFinishedId = sess.id;   // home shows "workout saved" with a share button
     showView('home');
+    el('main').scrollTop = 0;   // the FINISH button is at the bottom: bring the card into view
   } finally {
     finishing = false;
   }
@@ -840,6 +876,7 @@ function renderHome() {
     banner.classList.remove('visible');
     startBtn.style.display = '';
   }
+  renderFinishedCard();
 
   const recent = el('recent-list');
   const lbl = el('recent-label');
@@ -977,10 +1014,14 @@ function renderDetail() {
   // Edit button only on MY finished workouts, and only inside the edit window.
   const mine = !detailOwner && !!detailSession.finishedAt;
   if (mine && detailEditing && !canEditSession(detailSession)) stopEditing();
+  const shareBtn = mine && !detailEditing && hasShareableSets(detailSession)
+    ? `<button class="mini-btn accent" onclick="shareWorkout(${jsArg(detailSession.id)})">share</button>` : '';
+  if (shareBtn) prepareShare(detailSession);
   el('detail-actions').innerHTML = !mine ? ''
     : detailEditing ? `<button class="mini-btn accent" onclick="doneEditing()">done</button>`
-    : canEditSession(detailSession) ? `<button class="mini-btn" onclick="startEditing()">edit</button>`
-    : `<div class="edit-closed">editing closed</div>`;
+    : `<div class="actions-row">${shareBtn}${canEditSession(detailSession)
+        ? `<button class="mini-btn" onclick="startEditing()">edit</button>`
+        : `<div class="edit-closed">editing closed</div>`}</div>`;
   el('detail-footer').innerHTML = detailEditing
     ? `<button class="btn-danger" onclick="deleteWorkout()">DELETE WORKOUT</button>` : '';
   if (detailEditing && editDraft) { renderDetailEdit(); return; }
@@ -1024,6 +1065,125 @@ function renderDetail() {
   }).join('');
 }
 
+
+// ─── Share workout as image ──────────────────────────────────────────────────
+// One PNG (frontend/js/shareCard.js) through the iOS share sheet. The image is
+// drawn ahead of time (when the share button appears) so the tap can call
+// navigator.share() straight away, inside Safari's user-gesture window.
+const shareCache = new Map();   // key -> Promise<{ blob, file, caption }>
+const shareReady = new Map();   // key -> the resolved value
+// Building the model is cheap (no drawing); it is what the cache is keyed on,
+// so a PR gained or lost through another workout gives a fresh image.
+function shareJob(sess) {
+  const model = buildShareModel(sess, sessions, me);
+  return { model, key: shareCacheKey(sess, model) };
+}
+function prepareShare(sess, job = shareJob(sess)) {
+  const { model, key } = job;
+  if (!shareCache.has(key)) {
+    if (shareCache.size > 6) { shareCache.clear(); shareReady.clear(); }
+    const p = renderShareImage(model).then(img => {
+      const v = { blob: img.blob, caption: shareCaption(model),
+        file: new File([img.blob], shareFileName(sess), { type: 'image/png' }) };
+      shareReady.set(key, v);
+      return v;
+    });
+    // let the next tap retry (unless a newer render took this key meanwhile)
+    p.catch(() => { if (shareCache.get(key) === p) shareCache.delete(key); });
+    shareCache.set(key, p);
+  }
+  return shareCache.get(key);
+}
+function shareSession(id) {
+  if (detailSession && !detailOwner && detailSession.id === id) return detailSession;
+  return sessions.find(s => s.id === id);
+}
+let sharing = false;
+async function shareWorkout(id) {
+  const sess = shareSession(id);
+  if (!sess || sharing) return;
+  sharing = true;
+  try {
+    const job = shareJob(sess);
+    let img = shareReady.get(job.key);
+    if (!img) {
+      try { img = await prepareShare(sess, job); }
+      catch (err) {
+        console.error('share image failed:', err);
+        alert('Could not create the share image. Check your connection and try again.');
+        return;
+      }
+    }
+    if (await nativeShare(img)) return;
+    openSharePreview(img);
+  } finally {
+    sharing = false;
+  }
+}
+// true when the share sheet handled it (shared OR cancelled by the user);
+// false when this browser can't share the file, so the preview is shown.
+async function nativeShare(img) {
+  const files = [img.file];
+  if (!navigator.share || !navigator.canShare || !navigator.canShare({ files })) return false;
+  try {
+    await navigator.share({ files, text: img.caption });
+    return true;
+  } catch (err) {
+    if (err && err.name === 'AbortError') return true;   // closed the sheet: do nothing
+    console.warn('share failed:', err);
+    return false;
+  }
+}
+let previewImg = null, previewUrl = null;
+function openSharePreview(img) {
+  previewImg = img;
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = URL.createObjectURL(img.blob);   // the PNG already encoded; no second encode
+  el('share-preview-img').src = previewUrl;
+  el('share-preview-dl').href = previewUrl;
+  el('share-preview-dl').setAttribute('download', img.file.name);
+  const canFile = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [img.file] }));
+  el('share-preview-share').style.display = canFile ? '' : 'none';
+  el('share-overlay').classList.add('open');
+}
+function closeSharePreview() {
+  el('share-overlay').classList.remove('open');
+  el('share-preview-img').removeAttribute('src');
+  el('share-preview-dl').removeAttribute('href');
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+  previewImg = null;
+}
+let previewSharing = false;
+async function sharePreviewAgain() {
+  if (!previewImg || previewSharing) return;
+  previewSharing = true;
+  try { if (await nativeShare(previewImg)) closeSharePreview(); }
+  finally { previewSharing = false; }
+}
+// Home, right after "Finish workout": a "workout saved" card with share.
+function renderFinishedCard() {
+  const s = justFinishedId && !active ? sessions.find(x => x.id === justFinishedId) : null;
+  const slot = el('finished-slot');
+  if (!s) { slot.innerHTML = ''; return; }
+  const canShare = hasShareableSets(s);
+  if (canShare) prepareShare(s);
+  // Count what the image shows (blank sets / empty exercises are left off it).
+  const { model } = shareJob(s);
+  const exN = model.exercises.length, setN = model.setCount;
+  slot.innerHTML = `
+    <div class="card" id="finished-card">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div class="flex-fill clickable" onclick="openDetail(${jsArg(s.id)})">
+          <span class="pill">WORKOUT SAVED</span>
+          <div class="disp-md" style="margin-top:8px;">${esc(fmtDate(s.startedAt))}</div>
+          <div class="text-d">${exN} exercise${exN === 1 ? '' : 's'} · ${setN} set${setN === 1 ? '' : 's'}</div>
+        </div>
+        ${canShare ? `<button class="mini-btn accent" onclick="shareWorkout(${jsArg(s.id)})">share</button>` : ''}
+        <button class="mini-btn" aria-label="dismiss" onclick="dismissFinished()">×</button>
+      </div>
+    </div>`;
+}
+function dismissFinished() { justFinishedId = null; renderFinishedCard(); }
 
 // ─── Editing a finished workout (mine, within the edit window) ───────────────
 // The server enforces the window (403 after it) and ownership (404); this is
@@ -1900,13 +2060,14 @@ Object.assign(window, {
   openFriendHistory, loadMoreFriendHistory, openFhItem, loadMoreFeed, openFeedItem,
   renderLeaderboard,
   startEditing, doneEditing, editSetField, editAddSet, editRemoveSet, editRemoveExercise, deleteWorkout,
+  shareWorkout, closeSharePreview, sharePreviewAgain, dismissFinished,
 });
 
 // ─── Boot: require a valid token before loading the app ───────────────────────
 async function boot() {
   if (!getToken()) { window.location.href = '/login.html'; return; }
   try {
-    await GET('/auth/me');   // 401 → api() clears token + redirects to /login.html
+    ({ username: me = '' } = await GET('/auth/me'));   // 401 → api() clears token + redirects to /login.html
   } catch (err) {
     return; // redirect already triggered
   }

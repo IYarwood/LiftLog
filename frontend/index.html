@@ -287,6 +287,16 @@
   .seg-btn.active { background: var(--accent-dim); color: var(--accent-t); }
   .seg-btn:active { opacity: 0.75; }
   .lb-period { font-size: 12px; color: var(--text); margin-bottom: 2px; }
+  .lb-step { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .lb-step-mid { flex: 1; min-width: 0; text-align: center; }
+  .lb-step-mid .lb-period { margin-bottom: 0; }
+  .lb-step-name { font-family: var(--disp); font-size: 18px; letter-spacing: 1px; text-transform: uppercase; color: var(--text); }
+  .lb-step-btn {
+    flex-shrink: 0; width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-size: 22px; line-height: 1;
+  }
+  .lb-step-btn:active { border-color: var(--border-h); }
+  .lb-step-btn:disabled { opacity: 0.3; }
   .lb-rules { font-size: 10px; color: var(--text-d); line-height: 1.5; margin-bottom: 14px; }
   .lb-row {
     width: 100%; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 10px 12px;
@@ -1610,7 +1620,10 @@ function openFeedItem(i) { if (feedItems[i]) openFriendDetail(feedItems[i], 'fee
 // accepted friends) and which workouts count (finished only). Everything
 // user-controlled (usernames, exercise names) goes through esc().
 let lbBoard = 'week';           // 'week' | 'month' | 'strength'
-const lbData = {};              // board -> last response
+const lbData = {};              // lbKey() -> last response
+const lbOffset = { week: 0, month: 0 };   // 0 = current period, -1 = the one before, …
+const LB_MAX_BACK = 520;        // the server's limit (routes/leaderboard.js MAX_OFFSET)
+const lbKey = (board) => board === 'strength' ? 'strength' : `${board}:${lbOffset[board]}`;
 const lbOpen = {};              // board -> open row key (username / exercise key)
 const lbDetail = {};            // lowercased exercise name -> strength detail response
 let lbSeq = 0;
@@ -1650,27 +1663,30 @@ function setLbBoard(board) {
 
 async function loadLeaderboard() {
   const board = lbBoard;
+  const key = lbKey(board);
   const seq = ++lbSeq;
-  if (lbData[board]) renderLeaderboard();
-  else { el('lb-cta').innerHTML = ''; el('lb-head').innerHTML = ''; el('lb-filter').style.display = 'none'; el('lb-list').innerHTML = `<div class="loading">loading…</div>`; }
+  if (lbData[key]) renderLeaderboard();
+  else { el('lb-cta').innerHTML = ''; lbHeadLoading(board); el('lb-filter').style.display = 'none'; el('lb-list').innerHTML = `<div class="loading">loading…</div>`; }
   try {
-    const path = board === 'week' ? '/leaderboard/weekly' : board === 'month' ? '/leaderboard/monthly' : '/leaderboard/strength';
+    const off = board === 'strength' ? 0 : lbOffset[board];
+    const path = (board === 'week' ? '/leaderboard/weekly' : board === 'month' ? '/leaderboard/monthly' : '/leaderboard/strength')
+      + (off ? `?offset=${off}` : '');
     const res = await GET(path);
-    if (seq !== lbSeq) return;   // switched boards meanwhile
-    lbData[board] = res;
+    if (seq !== lbSeq) return;   // switched boards or periods meanwhile
+    lbData[key] = res;
     if (board === 'strength') for (const k of Object.keys(lbDetail)) delete lbDetail[k];
     renderLeaderboard();
     // Re-fetch an already open strength exercise so it isn't stale.
     if (board === 'strength' && lbOpen.strength) loadStrengthDetail(lbOpen.strength);
   } catch (err) {
     if (seq !== lbSeq) return;
-    if (!lbData[board]) el('lb-list').innerHTML = `<div class="empty">could not load leaderboard</div>`;
+    if (!lbData[key]) el('lb-list').innerHTML = `<div class="empty">could not load leaderboard</div>`;
   }
 }
 
 function renderLeaderboard() {
   if (currentView !== 'leaderboard') return;
-  const data = lbData[lbBoard];
+  const data = lbData[lbKey(lbBoard)];
   if (!data) return;
   el('lb-cta').innerHTML = data.hasFriends ? '' : `
     <div class="card lb-cta">
@@ -1682,16 +1698,58 @@ function renderLeaderboard() {
   else renderPoints(data);
 }
 
+// "this week", "last month", "3 weeks ago", …
+function lbPeriodName(period, offset) {
+  if (offset === 0) return `this ${period}`;
+  if (offset === -1) return `last ${period}`;
+  return `${-offset} ${period}s ago`;
+}
+
+// While a weekly/monthly board loads, keep the stepper where it is (so the
+// arrow stays under a repeat tap) showing the period being loaded.
+function lbHeadLoading(board) {
+  const head = el('lb-head');
+  const step = board !== 'strength' && head.querySelector('.lb-step');
+  if (!step) { head.innerHTML = ''; return; }
+  [...head.children].forEach(c => { if (c !== step) c.remove(); });
+  const off = lbOffset[board];
+  step.querySelector('.lb-step-name').textContent = lbPeriodName(board, off);
+  step.querySelector('.lb-period').textContent = 'loading…';
+  step.querySelector('[data-step="-1"]').disabled = off <= -LB_MAX_BACK;
+  step.querySelector('[data-step="1"]').disabled = off >= 0;
+}
+
+// Step the weekly/monthly board to an earlier (-1) or later (+1) period. Never
+// past the current one.
+function stepLbPeriod(delta) {
+  if (lbBoard === 'strength') return;
+  const next = lbOffset[lbBoard] + delta;
+  if (next > 0 || next < -LB_MAX_BACK) return;
+  lbOffset[lbBoard] = next;
+  loadLeaderboard();
+}
+
 function renderPoints(data) {
   el('lb-filter').style.display = 'none';
   const word = data.period === 'week' ? 'week' : 'month';
   const r = data.rules;
+  const off = data.offset || 0;
   el('lb-head').innerHTML = `
-    <div class="lb-period">${esc(fmtDay(data.startDate))} – ${esc(fmtDay(data.endDate))} · <span class="text-accent">${esc(resetsIn(data.end))}</span></div>
+    <div class="lb-step">
+      <button class="lb-step-btn" data-step="-1" aria-label="previous ${word}" ${off <= -LB_MAX_BACK ? 'disabled' : ''}>‹</button>
+      <div class="lb-step-mid">
+        <div class="lb-step-name">${esc(lbPeriodName(word, off))}</div>
+        <div class="lb-period">${esc(fmtDay(data.startDate))} – ${esc(fmtDay(data.endDate))} · ${off === 0
+          ? `<span class="text-accent">${esc(resetsIn(data.end))}</span>` : 'final'}</div>
+      </div>
+      <button class="lb-step-btn" data-step="1" aria-label="next ${word}" ${off >= 0 ? 'disabled' : ''}>›</button>
+    </div>
     <div class="lb-rules">+1% on your best estimated 1RM vs your last ${r.baselineWeeks} weeks = ${r.pointsPerPercent} pts (max ${r.progressCap} per exercise, ${r.progressTotalCap} total this ${word}; jumps over ${r.maxGainPct}% don't count) · ${r.pointsPerDay} pts per workout day (max ${r.daysCap}) · tap a row for details</div>`;
   const noPoints = data.entries.every(e => e.total === 0);
   el('lb-list').innerHTML = (noPoints
-      ? `<div class="empty" style="padding:4px 0 14px;">no points yet this ${word} — finish a workout to get on the board</div>` : '')
+      ? `<div class="empty" style="padding:4px 0 14px;">${off === 0
+          ? `no points yet this ${word} — finish a workout to get on the board`
+          : `nobody scored points that ${word}`}</div>` : '')
     + data.entries.map(e => {
       const open = lbOpen[lbBoard] === e.username;
       return `
@@ -1799,6 +1857,10 @@ function toggleLbRow(key) {
 el('lb-seg').addEventListener('click', e => {
   const b = e.target.closest('.seg-btn');
   if (b) setLbBoard(b.dataset.board);
+});
+el('lb-head').addEventListener('click', e => {
+  const b = e.target.closest('.lb-step-btn');
+  if (b && !b.disabled) stepLbPeriod(Number(b.dataset.step));
 });
 el('lb-list').addEventListener('click', e => {
   const row = e.target.closest('.lb-row');

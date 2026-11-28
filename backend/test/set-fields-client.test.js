@@ -121,3 +121,50 @@ test('a valid value typed after an invalid one is saved normally', async () => {
   await h.q.flushAll();
   assert.strictEqual(h.server.weight, '225');
 });
+
+// p-liftlog-094112: a comma decimal ("225,5", or "225," half-typed) used to
+// reach the app as "" from a type="number" input, clearing the stored weight
+// with no red highlight. The inputs are type="text" now, and a decimal comma
+// is accepted.
+test('comma decimal: parsed, sent with a dot, never treated as blank', async () => {
+  const { fieldSaveValue, setFieldError, setFieldNumber, normalizeSetInput } = await frontend('setFields.js');
+  assert.strictEqual(setFieldError('weight', '225,5'), '');
+  assert.strictEqual(setFieldError('weight', '225,'), '');
+  assert.strictEqual(setFieldError('weight', '102,25'), '');
+  assert.strictEqual(fieldSaveValue('weight', '225,5'), '225.5');
+  assert.strictEqual(fieldSaveValue('weight', '225,'), '225.');
+  assert.strictEqual(setFieldNumber('225,5'), 225.5);
+  assert.strictEqual(setFieldNumber('225,'), 225);
+  assert.strictEqual(setFieldNumber(' '), null);
+  // What the client sends must be accepted by the server as the same number.
+  assert.deepStrictEqual(parseSetFields({ weight: fieldSaveValue('weight', '225,5') }).fields, { weight: 225.5 });
+  assert.deepStrictEqual(parseSetFields({ weight: fieldSaveValue('weight', '225,') }).fields, { weight: 225 });
+  // Not a decimal comma → invalid (red), not silently misread.
+  for (const v of ['1,000', '22,5,5', ',', '2.5,5']) {
+    assert.notStrictEqual(setFieldError('weight', v), '', v);
+    assert.strictEqual(fieldSaveValue('weight', v), null, v);
+  }
+  assert.notStrictEqual(setFieldError('reps', '8,5'), '');
+  assert.strictEqual(normalizeSetInput('8'), '8');
+});
+
+test('typing "225,5" over a stored weight ends with 225.5 stored, never cleared', async () => {
+  const { createSaveQueue } = await frontend('saveQueue.js');
+  const { fieldSaveValue } = await frontend('setFields.js');
+  const server = { weight: 200 };
+  const q = createSaveQueue(async (t, f) => { Object.assign(server, parseSetFields(f).fields); }, 5);
+  const target = { sessionId: 'A', exId: 'e', setId: 's1' };
+  for (const text of ['2', '22', '225', '225,', '225,5']) {
+    q.schedule('s1', target, { weight: fieldSaveValue('weight', text) });
+    if (text === '225,') { await q.flushAll(); assert.strictEqual(server.weight, 225); }
+  }
+  await q.flushAll();
+  assert.strictEqual(server.weight, 225.5);
+});
+
+test('edit draft: a comma decimal is a change to 225.5, not a blank', async () => {
+  const { draftChanges } = await frontend('editDraft.js');
+  const orig = { exercises: [{ id: 'e', sets: [{ id: 's', reps: 5, weight: 200 }] }] };
+  const draft = { exercises: [{ id: 'e', sets: [{ id: 's', reps: 5, weight: '225,5' }] }] };
+  assert.deepStrictEqual(draftChanges(orig, draft), { patches: [{ exId: 'e', setId: 's', fields: { weight: 225.5 } }], invalid: [] });
+});

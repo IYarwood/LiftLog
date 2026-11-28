@@ -498,7 +498,7 @@
 <script type="module">
 import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
 import { createSaveQueue } from './js/saveQueue.js?v=dev';
-import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue } from './js/setFields.js?v=dev';
+import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue, setFieldNumber } from './js/setFields.js?v=dev';
 import { makeDraft, draftChanges, hasDraftChanges } from './js/editDraft.js?v=dev';
 import { buildShareModel, shareCaption, shareFileName, shareCacheKey, hasShareableSets, renderShareImage } from './js/shareCard.js?v=dev';
 
@@ -835,7 +835,7 @@ async function saveSet(exId, setId) {
   if (!s) return;
   if (setErrorText(s)) { showSetErrors(setId, s); return; }
   const target = { sessionId: active.id, exId, setId };
-  const vals = { reps: Number(s.reps) || 0, weight: Number(s.weight) || 0, savedAt: new Date().toISOString() };
+  const vals = { reps: setFieldNumber(s.reps) || 0, weight: setFieldNumber(s.weight) || 0, savedAt: new Date().toISOString() };
   // This PATCH carries every field, so the queued as-you-type save is no longer
   // needed — but one may already be in flight. Let it land first, so it can't
   // arrive after (and overwrite) this one.
@@ -932,11 +932,11 @@ function renderWorkout(flashSetId) {
       return `
         <div class="set-row ${flash}" id="setrow-${esc(s.id)}">
           <div class="set-num ${saved ? 'saved' : ''}">${si+1}</div>
-          <input class="set-input ${saved ? 'saved' : ''} ${!saved && setFieldError('reps', s.reps) ? 'invalid' : ''}" data-field="reps" type="number" inputmode="numeric" placeholder="—"
+          <input class="set-input ${saved ? 'saved' : ''} ${!saved && setFieldError('reps', s.reps) ? 'invalid' : ''}" data-field="reps" type="text" inputmode="numeric" autocomplete="off" placeholder="—"
             value="${esc(s.reps)}" ${saved ? 'readonly' : ''}
             onchange="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'reps',this.value)"
             oninput="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'reps',this.value)">
-          <input class="set-input ${saved ? 'saved' : ''} ${!saved && setFieldError('weight', s.weight) ? 'invalid' : ''}" data-field="weight" type="number" inputmode="decimal" placeholder="—"
+          <input class="set-input ${saved ? 'saved' : ''} ${!saved && setFieldError('weight', s.weight) ? 'invalid' : ''}" data-field="weight" type="text" inputmode="decimal" autocomplete="off" placeholder="—"
             value="${esc(s.weight)}" ${saved ? 'readonly' : ''}
             onchange="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'weight',this.value)"
             oninput="updateSetField(${jsArg(ex.id)},${jsArg(s.id)},'weight',this.value)">
@@ -1315,9 +1315,9 @@ function renderDetailEdit() {
       ${ex.sets.map((st, si) => `
         <div class="edit-set-row" id="setrow-${esc(st.id)}">
           <div class="set-num saved">${si + 1}</div>
-          <input class="set-input ${setFieldError('reps', st.reps) ? 'invalid' : ''}" data-field="reps" type="number" inputmode="numeric" placeholder="—"
+          <input class="set-input ${setFieldError('reps', st.reps) ? 'invalid' : ''}" data-field="reps" type="text" inputmode="numeric" autocomplete="off" placeholder="—"
             value="${esc(st.reps ?? '')}" oninput="editSetField(${jsArg(ex.id)},${jsArg(st.id)},'reps',this.value)">
-          <input class="set-input ${setFieldError('weight', st.weight) ? 'invalid' : ''}" data-field="weight" type="number" inputmode="decimal" placeholder="—"
+          <input class="set-input ${setFieldError('weight', st.weight) ? 'invalid' : ''}" data-field="weight" type="text" inputmode="decimal" autocomplete="off" placeholder="—"
             value="${esc(st.weight ?? '')}" oninput="editSetField(${jsArg(ex.id)},${jsArg(st.id)},'weight',this.value)">
           <button class="set-del-btn" aria-label="delete set" onclick="editRemoveSet(${jsArg(ex.id)},${jsArg(st.id)})">×</button>
         </div>

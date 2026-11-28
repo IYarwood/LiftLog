@@ -6,11 +6,11 @@
 // workout's values are real logged lifts, so a half-typed value (100 on the
 // way to 10000) must never reach the server. Leaving without "done" discards
 // the draft.
-import { setFieldError } from './setFields.js?v=dev';
+import { setFieldError, setFieldNumber } from './setFields.js?v=dev';
 
 const FIELDS = ['reps', 'weight'];
-const isBlank = (v) => v === '' || v === null || v === undefined;
-const norm = (v) => (isBlank(v) ? null : Number(v));
+const isBlank = (v) => setFieldNumber(v) === null;
+const norm = setFieldNumber;
 
 // A deep-enough copy of a workout for editing (the draft).
 export function makeDraft(session) {

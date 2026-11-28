@@ -31,6 +31,20 @@ main() {
   echo "→ Restarting app..."
   pm2 restart liftlog
 
+  # The API exits at startup on bad config (e.g. an invalid LEADERBOARD_TZ),
+  # and PM2 would then restart-loop it quietly: make the deploy fail loudly.
+  echo "→ Checking the API is up..."
+  local ok=
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 2
+    if curl -fsS --max-time 5 http://127.0.0.1:3001/api/health >/dev/null; then ok=1; break; fi
+  done
+  if [ -z "$ok" ]; then
+    echo "✗ API health check failed (http://127.0.0.1:3001/api/health). Recent logs:" >&2
+    pm2 logs liftlog --lines 30 --nostream >&2 || true
+    exit 1
+  fi
+
   echo "✓ Done. Check status with: pm2 status"
 }
 

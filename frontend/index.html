@@ -199,6 +199,12 @@
   .ex-manage-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); min-height: 52px; }
   .ex-manage-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-d); }
   .ex-manage-row .mini-btn { padding: 0 10px; }
+  /* Rename result under its row; covers the row's bottom border so they read as one. */
+  .ex-row-msg {
+    position: relative; margin-top: -1px; padding: 0 0 10px; background: var(--bg);
+    border-bottom: 1px solid var(--border); font-size: 12px; color: var(--accent-t); overflow-wrap: anywhere;
+  }
+  .ex-row-msg.err { color: var(--danger); }
   .ex-edit-input {
     flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border);
     border-radius: 6px; padding: 7px 10px; color: var(--text); font-family: var(--mono); font-size: 16px;
@@ -525,6 +531,10 @@ let editDraft = null;         // local copy being edited; sent only on "done"
 let manageReturn = 'home';    // view to go back to from the exercises page
 let manageEditing = null;     // library name currently being renamed, or null
 let manageDraft = '';         // text in the rename input (survives re-renders)
+// A rename's result is shown right under that exercise's row: the message at
+// the top of the page is off-screen when the row is far down the list on a
+// phone. { name, text, isErr }, or null.
+let manageRowMsg = null;
 let me = '';                  // my username (from /auth/me), shown on share images
 let justFinishedId = null;    // workout finished this visit: home offers to share it
 
@@ -1883,6 +1893,34 @@ function openManage() {
 function manageMsg(text, isErr) {
   el('manage-msg').textContent = text || '';
   el('manage-msg').classList.toggle('err', !!isErr);
+  manageRowMsg = null;
+  el('manage-list').querySelectorAll('.ex-row-msg').forEach(m => m.remove());
+}
+function manageRowMsgHtml(name) {
+  const m = manageRowMsg;
+  return m && m.name === name ? `<div class="ex-row-msg${m.isErr ? ' err' : ''}" role="status">${esc(m.text)}</div>` : '';
+}
+function findManageRow(name) {
+  return [...el('manage-list').querySelectorAll('.ex-manage-row')].find(r => r.dataset.row === name) || null;
+}
+// Show a message under `name`'s row, updating the DOM in place (no re-render,
+// so the rename input keeps focus and the keyboard stays up), and scroll it
+// into view.
+function showRowMsg(name, text, isErr) {
+  el('manage-msg').textContent = '';
+  el('manage-msg').classList.remove('err');
+  manageRowMsg = { name, text, isErr: !!isErr };
+  const row = findManageRow(name);
+  if (!row) return;
+  let box = row.nextElementSibling;
+  if (!box || !box.classList.contains('ex-row-msg')) {
+    box = document.createElement('div');
+    box.setAttribute('role', 'status');
+    row.after(box);
+  }
+  box.className = 'ex-row-msg' + (isErr ? ' err' : '');
+  box.textContent = text;
+  box.scrollIntoView({ block: 'nearest' });
 }
 function sortExercises() { exercises.sort((a, b) => a.localeCompare(b)); }
 // One library write at a time, so a double-tap can't send the same request twice.
@@ -1903,24 +1941,27 @@ async function loadManage() {
 
 function renderManage() {
   const filter = (el('manage-filter').value || '').toLowerCase();
-  const filtered = exercises.filter(e => e.toLowerCase().includes(filter) || e === manageEditing);
+  // The row being edited, or just renamed, stays visible even if the filter no
+  // longer matches it.
+  const filtered = exercises.filter(e => e.toLowerCase().includes(filter) || e === manageEditing ||
+    (manageRowMsg && e === manageRowMsg.name));
   const list = el('manage-list');
   if (!filtered.length) {
     list.innerHTML = `<div class="empty">${exercises.length ? 'no exercises match' : 'no exercises yet'}</div>`;
     return;
   }
-  list.innerHTML = filtered.map(name => name === manageEditing ? `
-    <div class="ex-manage-row">
+  list.innerHTML = filtered.map(name => (name === manageEditing ? `
+    <div class="ex-manage-row" data-row="${esc(name)}">
       <input class="ex-edit-input" type="text" maxlength="60" value="${esc(manageDraft)}"
         aria-label="new name" autocomplete="off" enterkeyhint="done">
       <button class="mini-btn accent ex-save-btn" data-name="${esc(name)}">save</button>
       <button class="mini-btn ex-cancel-btn" data-name="${esc(name)}">cancel</button>
     </div>` : `
-    <div class="ex-manage-row">
+    <div class="ex-manage-row" data-row="${esc(name)}">
       <span class="ex-manage-name">${esc(name)}</span>
       <button class="mini-btn ex-edit-btn" data-name="${esc(name)}">edit</button>
       <button class="mini-btn danger ex-remove-btn" data-name="${esc(name)}">remove</button>
-    </div>`).join('');
+    </div>`) + manageRowMsgHtml(name)).join('');
 }
 
 function addLibraryExercise() { return manageWrite(doAddLibraryExercise); }
@@ -1975,27 +2016,33 @@ function cancelRename() {
 function saveRename(oldName) { return manageWrite(() => doSaveRename(oldName)); }
 async function doSaveRename(oldName) {
   const name = manageDraft.trim();
-  if (!name) { manageMsg(EXERCISE_NAME_MSG, true); return; }
+  if (!name) { showRowMsg(oldName, EXERCISE_NAME_MSG, true); return; }
   if (name === oldName) { cancelRename(); return; }
+  let res;
   try {
-    const res = await PATCH(`/exercises/${encodeURIComponent(oldName)}`, { name });
-    exercises = exercises.map(e => e === oldName ? res.name : e);
-    sortExercises();
-    manageEditing = null;
-    manageMsg(`renamed to "${res.name}"`);
+    res = await PATCH(`/exercises/${encodeURIComponent(oldName)}`, { name });
   } catch (err) {
-    if (err.status === 409) { manageMsg('another exercise already has that name', true); return; }
-    if (err.status === 400) { manageMsg(nameErrorMsg(err), true); return; }
+    if (err.status === 409) { showRowMsg(oldName, 'another exercise already has that name', true); return; }
+    if (err.status === 400) { showRowMsg(oldName, nameErrorMsg(err), true); return; }
     if (err.status === 404) {
+      // The row is gone, so this one goes at the top — scrolled into view.
       manageMsg('that exercise was removed or renamed by someone else — list refreshed', true);
       manageEditing = null;
+      el('manage-msg').scrollIntoView({ block: 'center' });
       loadManage();
       return;
     }
-    manageMsg('Could not rename exercise — try again.', true);
+    showRowMsg(oldName, 'Could not rename exercise — try again.', true);
     return;
   }
+  exercises = exercises.map(e => e === oldName ? res.name : e);
+  sortExercises();
+  manageEditing = null;
+  manageRowMsg = { name: res.name, text: `renamed to "${res.name}"`, isErr: false };
   renderManage();
+  // It may have moved in the sorted list: bring it (and its message) into view.
+  const row = findManageRow(res.name);
+  if (row) row.scrollIntoView({ block: 'center' });
 }
 
 function removeExercise_lib(name) { return manageWrite(() => doRemoveExercise(name)); }

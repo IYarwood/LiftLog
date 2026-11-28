@@ -5,11 +5,11 @@
 //   shareCaption(model)                         -> the one-line share text
 //   layoutCard(model, measure)                  -> a draw list + canvas height
 //   drawCard(ctx, layout)                       -> paints the draw list
-//   renderShareImage(model)                     -> { blob, dataUrl } (browser only)
+//   renderShareImage(model)                     -> { blob } PNG (browser only)
 //
-// The card is 1080 wide and at least 1350 tall (4:5). It never clips: a row
-// with more than SETS_PER_LINE sets wraps onto a second line, and the image
-// grows taller when the rows don't fit. Ported from the designer's mockup
+// The card is 1080 wide and exactly as tall as its content (a typical
+// 6-exercise workout is close to 4:5). It never clips: a row with more than
+// SETS_PER_LINE sets wraps onto a second line and the image grows taller. Ported from the designer's mockup
 // (liftlog-share-mockups/src/workout.js + card.css, drawn there at 360x450 x3).
 
 // ─── Pure logic ──────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ export function prSetIndex(sets, priorMax) {
   if (priorMax === null || priorMax === undefined) return -1;
   let idx = -1;
   sets.forEach((s, i) => {
-    if (!(s.weight > priorMax)) return;
+    if (!(s.weight > priorMax) || !(s.reps > 0)) return;
     if (idx === -1 || s.weight > sets[idx].weight || (s.weight === sets[idx].weight && s.reps > sets[idx].reps)) idx = i;
   });
   return idx;
@@ -131,6 +131,13 @@ export function shareCaption(model) {
   return parts.join(' · ');
 }
 
+// Cache key for a rendered image. It covers the built model, not just this
+// workout's sets: best/PR marks depend on the OTHER workouts too (an earlier
+// one edited or deleted can add or remove a PR here), and on the username.
+export function shareCacheKey(session, model) {
+  return JSON.stringify([session.id, session.startedAt, model]);
+}
+
 export function shareFileName(session) {
   const d = new Date(session.startedAt);
   const p = (n) => String(n).padStart(2, '0');
@@ -138,7 +145,7 @@ export function shareFileName(session) {
 }
 
 // ─── Layout ──────────────────────────────────────────────────────────────────
-export const W = 1080, MIN_H = 1350, SETS_PER_LINE = 5;
+export const W = 1080, SETS_PER_LINE = 5;
 export const COLORS = {
   bg: '#080b0f', border: '#1e2530', accent: '#4af0b0', warn: '#f0a030',
   text: '#c8d8e8', text2: '#8299ac', ink: '#e8f0f7',
@@ -166,10 +173,7 @@ const GAP = 30;
 const NAME_W = CONTENT_W - SETS_W - GAP; // 348
 const NAME_LH = 54;                      // line height for exercise names
 const SET_LINE_H = 104;                  // weight + reps, one line of sets
-const WRAP_GAP = 18;                     // extra space between wrapped set lines
-const ROW_PAD = 14;                      // min space above/below a row's content
-const ROW_MAX = 160;                     // rows never stretch taller than this
-const KEY_H = 27 + 30;                   // key line + gap above it
+const ROW_PAD = 19;                      // space above/below a row's content
 
 // fontSize from a CSS font shorthand ("600 57px 'X'") -> 57
 const sizeOf = (font) => Number(/([\d.]+)px/.exec(font)[1]);
@@ -253,16 +257,14 @@ export function layoutCard(model, measure) {
     }
     const nameH = (lines.length + (badgeOnOwnLine ? 1 : 0)) * NAME_LH;
     const setLines = Math.ceil(ex.sets.length / SETS_PER_LINE);
-    const setsH = setLines * SET_LINE_H + (setLines - 1) * WRAP_GAP;
+    const setsH = setLines * SET_LINE_H;
     return { ex, lines, badgeOnOwnLine, nameH, setsH, natural: Math.max(nameH, setsH) + 2 * ROW_PAD };
   });
-  // Rows share the space down to the key evenly (as in the mockup), but never
-  // shrink below their content or stretch past ROW_MAX. If they don't fit in
-  // 1350, the image grows.
-  const avail = MIN_H - PAD_BOT - KEY_H - rowsTop;
-  const naturalTotal = rows.reduce((a, r) => a + r.natural, 0);
-  const share = rows.length ? Math.min(ROW_MAX, avail / rows.length) : 0;
-  rows.forEach(r => { r.h = naturalTotal <= avail ? Math.max(r.natural, share) : r.natural; });
+  // Each row is as tall as its content; the card is as tall as its rows.
+  rows.forEach(r => { r.h = r.natural; });
+  // One weight size for the whole card, so columns read as one grid.
+  const weightFont = model.exercises.flatMap(ex => ex.sets.map(st => fmtWeight(st.weight)))
+    .reduce((f, t) => fitFont(t, f, COL_W - 26, measure), FONTS.weight);
 
   items.push({ kind: 'line', x1: PAD_X, x2: W - PAD_X, y: rowsTop, color: COLORS.border });
   for (const r of rows) {
@@ -283,11 +285,10 @@ export function layoutCard(model, measure) {
     r.ex.sets.forEach((s, i) => {
       const col = i % SETS_PER_LINE, line = Math.floor(i / SETS_PER_LINE);
       const cx = W - PAD_X - SETS_W + col * COL_W + COL_W / 2;
-      const ly = sy + line * (SET_LINE_H + WRAP_GAP);
-      const isPr = i === r.ex.pr, isTop = !isPr && i === r.ex.best;
+      const ly = sy + line * SET_LINE_H;
+      const isPr = i === r.ex.pr, isTop = !isPr && r.ex.sets.length > 1 && i === r.ex.best;
       const wt = fmtWeight(s.weight);
-      const wFont = fitFont(wt, FONTS.weight, COL_W - 10, measure);
-      text(wt, cx, ly + 10 + 48, wFont, isPr ? COLORS.warn : isTop ? COLORS.accent : COLORS.text, 'center');
+      text(wt, cx, ly + 10 + 48, weightFont, isPr ? COLORS.warn : isTop ? COLORS.accent : COLORS.text, 'center');
       const rp = `×${s.reps}`;
       const rFont = fitFont(rp, FONTS.reps, COL_W - 6, measure);
       text(rp, cx, ly + 10 + 48 + 9 + 28, rFont, (isPr || isTop) ? COLORS.text : COLORS.text2, 'center');
@@ -296,17 +297,22 @@ export function layoutCard(model, measure) {
     items.push({ kind: 'line', x1: PAD_X, x2: W - PAD_X, y, color: COLORS.border });
   }
 
-  // Key, pinned to the bottom
-  const height = Math.max(MIN_H, Math.ceil(y + KEY_H + PAD_BOT));
-  const keyBase = height - PAD_BOT - 4;
-  let kx = PAD_X;
-  items.push({ kind: 'rect', x: kx, y: keyBase - 20, w: 21, h: 21, r: 6, color: COLORS.accent });
-  kx += 21 + 18;
-  text('best set', kx, keyBase, FONTS.key, COLORS.text2);
-  kx += measure('best set', FONTS.key) + 42;
-  items.push({ kind: 'rect', x: kx, y: keyBase - 20, w: 21, h: 21, r: 6, color: COLORS.warn });
-  kx += 21 + 18;
-  text('personal record', kx, keyBase, FONTS.key, COLORS.text2);
+  // Key right under the rows, with only the markers that appear on this card.
+  const keys = [];
+  if (model.exercises.some(ex => ex.sets.length > 1 && ex.best >= 0 && ex.best !== ex.pr)) keys.push(['best set', COLORS.accent]);
+  if (model.exercises.some(ex => ex.pr >= 0)) keys.push(['personal record', COLORS.warn]);
+  let height = Math.ceil(y + PAD_BOT);
+  if (keys.length) {
+    const keyBase = y + 61;
+    let kx = PAD_X;
+    for (const [label, color] of keys) {
+      items.push({ kind: 'rect', x: kx, y: keyBase - 20, w: 21, h: 21, r: 6, color });
+      kx += 21 + 18;
+      text(label, kx, keyBase, FONTS.key, COLORS.text2);
+      kx += measure(label, FONTS.key) + 42;
+    }
+    height = Math.ceil(keyBase + 6 + PAD_BOT);
+  }
 
   return { width: W, height, items };
 }
@@ -383,5 +389,6 @@ export async function renderShareImage(model) {
   canvas.height = layout.height;
   drawCard(ctx, layout);
   const blob = await new Promise((res, rej) => canvas.toBlob(b => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/png'));
-  return { blob, dataUrl: canvas.toDataURL('image/png'), width: layout.width, height: layout.height };
+  canvas.width = canvas.height = 0;   // free the bitmap now (iOS caps total canvas memory)
+  return { blob, width: layout.width, height: layout.height };
 }

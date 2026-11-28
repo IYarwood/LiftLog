@@ -500,7 +500,7 @@ import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js
 import { createSaveQueue } from './js/saveQueue.js?v=dev';
 import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue } from './js/setFields.js?v=dev';
 import { makeDraft, draftChanges, hasDraftChanges } from './js/editDraft.js?v=dev';
-import { buildShareModel, shareCaption, shareFileName, hasShareableSets, renderShareImage } from './js/shareCard.js?v=dev';
+import { buildShareModel, shareCaption, shareFileName, shareCacheKey, hasShareableSets, renderShareImage } from './js/shareCard.js?v=dev';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let exercises = [];   // string[]
@@ -1070,24 +1070,26 @@ function renderDetail() {
 // One PNG (frontend/js/shareCard.js) through the iOS share sheet. The image is
 // drawn ahead of time (when the share button appears) so the tap can call
 // navigator.share() straight away, inside Safari's user-gesture window.
-const shareCache = new Map();   // key -> Promise<{ file, caption, dataUrl }>
+const shareCache = new Map();   // key -> Promise<{ blob, file, caption }>
 const shareReady = new Map();   // key -> the resolved value
-function shareKey(sess) {
-  return JSON.stringify([me, sess.id, sess.startedAt, sess.finishedAt,
-    (sess.exercises || []).map(e => [e.name, (e.sets || []).map(s => [s.reps, s.weight])])]);
+// Building the model is cheap (no drawing); it is what the cache is keyed on,
+// so a PR gained or lost through another workout gives a fresh image.
+function shareJob(sess) {
+  const model = buildShareModel(sess, sessions, me);
+  return { model, key: shareCacheKey(sess, model) };
 }
-function prepareShare(sess) {
-  const key = shareKey(sess);
+function prepareShare(sess, job = shareJob(sess)) {
+  const { model, key } = job;
   if (!shareCache.has(key)) {
     if (shareCache.size > 6) { shareCache.clear(); shareReady.clear(); }
-    const model = buildShareModel(sess, sessions, me);
     const p = renderShareImage(model).then(img => {
-      const v = { ...img, caption: shareCaption(model),
+      const v = { blob: img.blob, caption: shareCaption(model),
         file: new File([img.blob], shareFileName(sess), { type: 'image/png' }) };
       shareReady.set(key, v);
       return v;
     });
-    p.catch(() => shareCache.delete(key));   // let the next tap retry
+    // let the next tap retry (unless a newer render took this key meanwhile)
+    p.catch(() => { if (shareCache.get(key) === p) shareCache.delete(key); });
     shareCache.set(key, p);
   }
   return shareCache.get(key);
@@ -1102,9 +1104,10 @@ async function shareWorkout(id) {
   if (!sess || sharing) return;
   sharing = true;
   try {
-    let img = shareReady.get(shareKey(sess));
+    const job = shareJob(sess);
+    let img = shareReady.get(job.key);
     if (!img) {
-      try { img = await prepareShare(sess); }
+      try { img = await prepareShare(sess, job); }
       catch (err) {
         console.error('share image failed:', err);
         alert('Could not create the share image. Check your connection and try again.');
@@ -1131,11 +1134,13 @@ async function nativeShare(img) {
     return false;
   }
 }
-let previewImg = null;
+let previewImg = null, previewUrl = null;
 function openSharePreview(img) {
   previewImg = img;
-  el('share-preview-img').src = img.dataUrl;
-  el('share-preview-dl').href = img.dataUrl;
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = URL.createObjectURL(img.blob);   // the PNG already encoded; no second encode
+  el('share-preview-img').src = previewUrl;
+  el('share-preview-dl').href = previewUrl;
   el('share-preview-dl').setAttribute('download', img.file.name);
   const canFile = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [img.file] }));
   el('share-preview-share').style.display = canFile ? '' : 'none';
@@ -1144,10 +1149,16 @@ function openSharePreview(img) {
 function closeSharePreview() {
   el('share-overlay').classList.remove('open');
   el('share-preview-img').removeAttribute('src');
+  el('share-preview-dl').removeAttribute('href');
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
   previewImg = null;
 }
+let previewSharing = false;
 async function sharePreviewAgain() {
-  if (previewImg && await nativeShare(previewImg)) closeSharePreview();
+  if (!previewImg || previewSharing) return;
+  previewSharing = true;
+  try { if (await nativeShare(previewImg)) closeSharePreview(); }
+  finally { previewSharing = false; }
 }
 // Home, right after "Finish workout": a "workout saved" card with share.
 function renderFinishedCard() {
@@ -1156,14 +1167,16 @@ function renderFinishedCard() {
   if (!s) { slot.innerHTML = ''; return; }
   const canShare = hasShareableSets(s);
   if (canShare) prepareShare(s);
-  const sets = (s.exercises || []).reduce((a, e) => a + (e.sets || []).length, 0);
+  // Count what the image shows (blank sets / empty exercises are left off it).
+  const { model } = shareJob(s);
+  const exN = model.exercises.length, setN = model.setCount;
   slot.innerHTML = `
     <div class="card" id="finished-card">
       <div style="display:flex; align-items:center; gap:8px;">
         <div class="flex-fill clickable" onclick="openDetail(${jsArg(s.id)})">
           <span class="pill">WORKOUT SAVED</span>
           <div class="disp-md" style="margin-top:8px;">${esc(fmtDate(s.startedAt))}</div>
-          <div class="text-d">${(s.exercises || []).length} exercises · ${sets} sets</div>
+          <div class="text-d">${exN} exercise${exN === 1 ? '' : 's'} · ${setN} set${setN === 1 ? '' : 's'}</div>
         </div>
         ${canShare ? `<button class="mini-btn accent" onclick="shareWorkout(${jsArg(s.id)})">share</button>` : ''}
         <button class="mini-btn" aria-label="dismiss" onclick="dismissFinished()">×</button>

@@ -125,3 +125,22 @@ export function createSaveQueue(send, delay = 600, { onRejected } = {}) {
     get size() { return pending.size; },
   };
 }
+
+// Save one key's full value now (the set's SAVE button), outside the debounce.
+// Any as-you-type save for the key is sent first and awaited, so it can't land
+// after (and overwrite) this one. Only THEN are the values read: read() runs
+// after the wait, so a keystroke made while that save was in flight is part of
+// what gets sent (reading first sent — and showed — the older value).
+//   read()     → the values to send, or null to not save (e.g. now invalid);
+//                its edits stay queued in that case.
+//   send(vals) → the request; if it throws, the error propagates (the caller
+//                decides how to requeue).
+// Resolves to the values sent, or null if read() declined.
+export async function saveNow(queue, key, read, send) {
+  await queue.flush(key);
+  const vals = read();
+  if (!vals) return null;
+  queue.drop(key);   // edits typed during the wait are in vals: don't resend them
+  await send(vals);
+  return vals;
+}

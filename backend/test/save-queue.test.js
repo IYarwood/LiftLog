@@ -296,3 +296,50 @@ test('flush on a key with nothing pending or in flight resolves immediately', as
   const q = createSaveQueue(async () => {}, 600);
   await q.flush('nothing');
 });
+
+// p-liftlog-220144: SAVE used to read the inputs before awaiting the in-flight
+// as-you-type save, so a keystroke made during that wait was neither in the
+// full PATCH nor kept on screen.
+test('saveNow reads the values only after the in-flight save has landed', async () => {
+  const { createSaveQueue, saveNow } = await load();
+  const server = {};
+  let release;
+  const gate = new Promise(r => { release = r; });
+  const q = createSaveQueue(async (t, f) => { await gate; Object.assign(server, f); }, 1000);
+  const state = { weight: '22' };
+  const target = { sessionId: 'A', exId: 'e', setId: 's1' };
+  q.schedule('s1', target, { weight: state.weight });
+  q.flush('s1');                                  // as-you-type save now in flight
+  const sentFull = [];
+  const done = saveNow(q, 's1', () => ({ weight: state.weight }), async (v) => { sentFull.push(v); Object.assign(server, v); });
+  await sleep(5);
+  state.weight = '225';                           // typed while that save is in flight
+  q.schedule('s1', target, { weight: state.weight });
+  release();
+  const vals = await done;
+  assert.deepStrictEqual(vals, { weight: '225' });
+  assert.deepStrictEqual(sentFull, [{ weight: '225' }]);
+  assert.strictEqual(server.weight, '225');
+  assert.strictEqual(q.size, 0, 'the queued edit is covered by the full save, not resent');
+  await sleep(20);
+  assert.strictEqual(server.weight, '225');
+});
+
+test('saveNow: read() returning null sends nothing and keeps queued edits', async () => {
+  const { createSaveQueue, saveNow } = await load();
+  const { sent, send } = recorder();
+  const q = createSaveQueue(send, 1000);
+  const t = { sessionId: 'A', exId: 'e', setId: 's1' };
+  let full = 0;
+  const p = saveNow(q, 's1', () => { q.schedule('s1', t, { weight: null }); return null; }, async () => { full++; });
+  assert.strictEqual(await p, null);
+  assert.strictEqual(full, 0);
+  assert.strictEqual(q.size, 1);
+  q.drop('s1');
+});
+
+test('saveNow: a failing send rejects so the caller can requeue', async () => {
+  const { createSaveQueue, saveNow } = await load();
+  const q = createSaveQueue(async () => {}, 1000);
+  await assert.rejects(saveNow(q, 's1', () => ({ reps: 5 }), async () => { throw new Error('offline'); }), /offline/);
+});

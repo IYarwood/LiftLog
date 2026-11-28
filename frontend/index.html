@@ -497,7 +497,7 @@
 
 <script type="module">
 import { api, GET, POST, PATCH, DELETE, getToken, clearToken } from './js/api.js?v=dev';
-import { createSaveQueue } from './js/saveQueue.js?v=dev';
+import { createSaveQueue, saveNow } from './js/saveQueue.js?v=dev';
 import { SET_LIMITS_MSG, setFieldError, setErrorText, fieldSaveValue, setFieldNumber } from './js/setFields.js?v=dev';
 import { makeDraft, draftChanges, hasDraftChanges } from './js/editDraft.js?v=dev';
 import { buildShareModel, shareCaption, shareFileName, shareCacheKey, hasShareableSets, renderShareImage } from './js/shareCard.js?v=dev';
@@ -828,6 +828,10 @@ function updateSetField(exId, setId, field, val) {
   setSaves.schedule(setId, { sessionId: active.id, exId, setId }, { [field]: fieldSaveValue(field, val) });
 }
 
+function setRowLocked(setId, locked) {
+  const row = el('setrow-' + setId);
+  if (row) row.querySelectorAll('.set-input').forEach(inp => { inp.readOnly = locked; });
+}
 async function saveSet(exId, setId) {
   const ex = active.exercises.find(e => e.id === exId);
   if (!ex) return;
@@ -835,21 +839,26 @@ async function saveSet(exId, setId) {
   if (!s) return;
   if (setErrorText(s)) { showSetErrors(setId, s); return; }
   const target = { sessionId: active.id, exId, setId };
-  const vals = { reps: setFieldNumber(s.reps) || 0, weight: setFieldNumber(s.weight) || 0, savedAt: new Date().toISOString() };
-  // This PATCH carries every field, so the queued as-you-type save is no longer
-  // needed — but one may already be in flight. Let it land first, so it can't
-  // arrive after (and overwrite) this one.
-  setSaves.drop(setId);
-  await setSaves.flush(setId);
+  // saveNow waits for an as-you-type save already in flight, THEN reads the
+  // values (so a keystroke made meanwhile is what gets saved and shown), and
+  // drops the queued save this full PATCH replaces.
+  let vals;
   try {
-    await PATCH(`/sessions/${target.sessionId}/exercises/${exId}/sets/${setId}`, vals);
+    vals = await saveNow(setSaves, setId, () => {
+      if (!setExists(target)) return null;              // removed meanwhile
+      if (setErrorText(s)) { showSetErrors(setId, s); return null; }
+      setRowLocked(setId, true);   // no typing while the PATCH is out: it would be overwritten
+      return { reps: setFieldNumber(s.reps) || 0, weight: setFieldNumber(s.weight) || 0, savedAt: new Date().toISOString() };
+    }, (v) => PATCH(`/sessions/${target.sessionId}/exercises/${exId}/sets/${setId}`, v));
   } catch (err) {
+    setRowLocked(setId, false);
     // Put the typed values back in the queue so FINISH still sends them.
     setSaves.schedule(setId, target, { reps: fieldSaveValue('reps', s.reps), weight: fieldSaveValue('weight', s.weight) });
     alert(err.status === 400 ? `Not saved: ${(err.body && err.body.error) || 'invalid value'}.`
       : 'Could not save the set — check your connection and try again.');
     return;
   }
+  if (!vals) return;
   Object.assign(s, vals);
   renderWorkout(setId);
 }

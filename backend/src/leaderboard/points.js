@@ -5,7 +5,25 @@
 // Weekly/monthly periods reset at 00:00 in this timezone (Monday for weekly,
 // the 1st for monthly). Any IANA zone name Postgres knows. LEADERBOARD_TZ in
 // backend/.env overrides it without a code change.
+// index.js checks it at startup (checkTimezone) and refuses to start on a bad
+// value, instead of every leaderboard request failing later with a 500.
 const TIMEZONE = process.env.LEADERBOARD_TZ || 'America/New_York';
+
+// Throws a clear Error if `tz` isn't an IANA zone name this Node knows.
+// (Node's ICU and Postgres share the IANA database, so a zone accepted here is
+// one Postgres's AT TIME ZONE accepts.)
+function checkTimezone(tz) {
+  const fix = 'Set LEADERBOARD_TZ in backend/.env to an IANA zone such as America/New_York, or remove it to use the default.';
+  if (typeof tz !== 'string' || !tz.trim() || tz !== tz.trim()) {
+    throw new Error(`Invalid LEADERBOARD_TZ ${JSON.stringify(tz)}. ${fix}`);
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+  } catch {
+    throw new Error(`Invalid LEADERBOARD_TZ "${tz}": not a known IANA time zone. ${fix}`);
+  }
+  return tz;
+}
 
 // Only sets in this rep range feed the e1RM (higher-rep estimates are noise).
 const E1RM_MIN_REPS = 1;
@@ -175,7 +193,7 @@ function buildBoard({ users, lifts, days, period, viewerId }) {
 }
 
 module.exports = {
-  TIMEZONE, E1RM_MIN_REPS, E1RM_MAX_REPS, BASELINE_WEEKS, POINTS_PER_PERCENT,
+  TIMEZONE, checkTimezone, E1RM_MIN_REPS, E1RM_MAX_REPS, BASELINE_WEEKS, POINTS_PER_PERCENT,
   PROGRESS_CAP, PROGRESS_TOTAL_CAP, MAX_PLAUSIBLE_GAIN_PCT, POINTS_PER_DAY, DAYS_CAP, PERIODS, CROWN_MAX_JUMP_PCT,
   e1rm, progressPoints, consistencyPoints, assignRanks, buildBoard, round1,
   withinCrownJump, isVerifiedLift, strengthStandings,

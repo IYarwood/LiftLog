@@ -297,6 +297,7 @@
   .lb-step { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .lb-step-mid { flex: 1; min-width: 0; text-align: center; }
   .lb-step-mid .lb-period { margin-bottom: 0; white-space: nowrap; }
+  .lb-step-mid .lb-state.text-accent { color: var(--accent-t); }   /* .lb-period (later) would win */
   .lb-step-name { font-family: var(--disp); font-size: 18px; letter-spacing: 1px; text-transform: uppercase; color: var(--text); }
   .lb-step-btn {
     flex-shrink: 0; width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
